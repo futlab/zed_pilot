@@ -46,6 +46,7 @@ include_directories(
 
 set(SOURCES
     src/zed.cpp             include/zed.h
+    src/pilot.cpp           include/pilot.h
     src/controllers.cpp     include/controllers.h
 )
 
