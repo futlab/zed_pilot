@@ -1,6 +1,7 @@
 #ifndef PILOT_H
 #define PILOT_H
 #include <string>
+//#include <Eigen/Core>
 
 enum PilotMode
 {

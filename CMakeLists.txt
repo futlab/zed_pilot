@@ -18,6 +18,7 @@ endif()
 find_package(ZED 2 REQUIRED)
 find_package(CUDA ${ZED_CUDA_VERSION} EXACT REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 if (${USE_ROS})
     find_package(catkin REQUIRED COMPONENTS
@@ -46,6 +47,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${ZED_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS}
+  ${Eigen3_INCLUDE_DIRS}
   include
 )
 

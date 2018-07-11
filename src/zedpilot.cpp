@@ -1,9 +1,14 @@
-#include <iostream>
+﻿#include <iostream>
+#include <opencv2/imgproc.hpp>
+#ifdef SHOW_RESULT
+#include <opencv2/highgui.hpp>
+#endif
+
 #include "zedpilot.h"
 
 using namespace std;
 
-ZedPilot::ZedPilot() : serialNumber(0)
+ZedPilot::ZedPilot() : stateImageSize(672, 376), serialNumber(0)
 {
     parameters.sdk_verbose = true;
     parameters.coordinate_units = sl::UNIT_METER;
@@ -21,6 +26,28 @@ void ZedPilot::debug(const string &message)     { cout << "DEBUG: " << message <
 void ZedPilot::warn(sl::ERROR_CODE code)        { warn(sl::toString(code).c_str()); }
 void ZedPilot::infoOnce(sl::ERROR_CODE code)    { infoOnce(sl::toString(code).c_str()); }
 
+cv::Mat slMat2cvMat(sl::Mat& input)
+{
+    using namespace sl;
+    // Mapping between MAT_TYPE and CV_TYPE
+    int cv_type = -1;
+    switch (input.getDataType()) {
+        case MAT_TYPE_32F_C1: cv_type = CV_32FC1; break;
+        case MAT_TYPE_32F_C2: cv_type = CV_32FC2; break;
+        case MAT_TYPE_32F_C3: cv_type = CV_32FC3; break;
+        case MAT_TYPE_32F_C4: cv_type = CV_32FC4; break;
+        case MAT_TYPE_8U_C1: cv_type = CV_8UC1; break;
+        case MAT_TYPE_8U_C2: cv_type = CV_8UC2; break;
+        case MAT_TYPE_8U_C3: cv_type = CV_8UC3; break;
+        case MAT_TYPE_8U_C4: cv_type = CV_8UC4; break;
+        default: break;
+    }
+
+    // Since cv::Mat data requires a uchar* pointer, we get the uchar1 pointer from sl::Mat (getPtr<T>())
+    // cv::Mat and sl::Mat will share a single memory structure
+    return cv::Mat((int)input.getHeight(), (int)input.getWidth(), cv_type, input.getPtr<sl::uchar1>(MEM_CPU));
+}
+
 void ZedPilot::open()
 {
     sl::ERROR_CODE err = sl::ERROR_CODE_CAMERA_NOT_DETECTED;
@@ -30,6 +57,11 @@ void ZedPilot::open()
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
     enableTracking();
+
+    slLeftImage  = make_unique<sl::Mat>(camera.getResolution(), sl::MAT_TYPE_8U_C4, sl::MEM_CPU);
+    slRightImage = make_unique<sl::Mat>(camera.getResolution(), sl::MAT_TYPE_8U_C4, sl::MEM_CPU);
+    leftImage = slMat2cvMat(*slLeftImage);
+    rightImage = slMat2cvMat(*slRightImage);
 }
 
 void ZedPilot::open(const string &svoFileName)
@@ -88,6 +120,33 @@ sl::DeviceProperties ZedPilot::zedFromSN()
     return prop;
 }
 
+void ZedPilot::processFrame()
+{
+    assert(slLeftImage && slRightImage);
+    camera.retrieveImage(*slLeftImage, sl::VIEW_LEFT, sl::MEM_CPU);
+    camera.retrieveImage(*slRightImage, sl::VIEW_RIGHT, sl::MEM_CPU);
+
+    camera.getPosition(pose);
+    publishPose(pose);
+
+    processStateImage();
+}
+
+void ZedPilot::processStateImage()
+{
+    cv::resize(leftImage, stateImage, stateImageSize, 0, 0, cv::INTER_NEAREST);
+#ifdef SHOW_RESULT
+    cv::imshow("State image", stateImage);
+    cv::waitKey(1);
+#endif
+    publishStateImage(stateImage);
+}
+
+void ZedPilot::publishStateImage(const cv::Mat &stateImage)
+{
+}
+
+
 void ZedPilot::grab()
 {
     auto grabStatus = camera.grab(runtimeParameters);
@@ -107,8 +166,7 @@ void ZedPilot::grab()
     } else
         lastGrabTime = chrono::steady_clock::now();
 
-    camera.getPosition(pose);
-    publishPose(pose);
+    processFrame();
 }
 
 int ZedPilot::checkCameraReady()

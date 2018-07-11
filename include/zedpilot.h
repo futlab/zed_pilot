@@ -1,7 +1,9 @@
 #ifndef ZED_H
 #define ZED_H
 #include <string>
+#include <memory>
 #include <sl/Camera.hpp>
+#include <opencv2/core.hpp>
 
 #include "pilot.h"
 
@@ -10,13 +12,20 @@ class ZedPilot
 private:
     sl::Pose pose;
     std::chrono::steady_clock::time_point lastGrabTime;
+    std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
+    cv::Mat leftImage, rightImage;
+    cv::Mat stateImage;
+    cv::Size stateImageSize;
+    void processFrame();
+    void processStateImage();
 protected:
     Pilot pilot;
+    virtual void publishPose(sl::Pose &) {}
+    virtual void publishStateImage(const cv::Mat &stateImage);
     virtual void warn(const std::string &message);
     virtual void info(const std::string &message);
     virtual void infoOnce(const std::string &message);
     virtual void debug(const std::string &message);
-    virtual void publishPose(sl::Pose &) {}
     void infoOnce(sl::ERROR_CODE code);
     void warn(sl::ERROR_CODE code);
     unsigned int serialNumber;
