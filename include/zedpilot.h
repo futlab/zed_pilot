@@ -19,14 +19,17 @@ private:
     cv::Mat leftImage, rightImage;
     cv::Mat stateImage, stateImage4;
     cv::Size stateImageSize;
+    bool recordingEnabled;
+    size_t framesRecorded;
 #ifdef USE_GST
     std::unique_ptr<Pipeline> transmitter;
 #endif
     void processFrame();
     void processStateImage();
+    void enableRecording();
 protected:
     Pilot pilot;
-    std::string videoUdpTarget;
+    std::string videoUdpTarget, svoOutputPrefix;
     virtual void publishPose(sl::Pose &) {}
     virtual void publishStateImage(const cv::Mat &stateImage);
     virtual void warn(const std::string &message);
@@ -50,6 +53,7 @@ protected:
     int checkCameraReady();
 public:
     ZedPilot();
+    void shutdown();
 };
 
 #endif // ZED_H

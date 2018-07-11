@@ -70,8 +70,6 @@ void ZedPilotNode::MavStateCallback(const mavros_msgs::State::ConstPtr &state)
     pilot.onState(state->connected, state->armed, state->guided, state->mode);
 }
 
-
-
 void ZedPilotNode::init()
 {
     // Defaults
@@ -95,6 +93,7 @@ void ZedPilotNode::init()
     nhp.param<string>("camera_frame", cameraFrameId, "camera_frame");
 
     nhp.getParam("video_udp_target", videoUdpTarget);
+    nhp.getParam("svo_output_prefix", svoOutputPrefix);
     nhp.getParam("resolution", resolution);
     nhp.getParam("quality", quality);
     parameters.depth_mode = static_cast<sl::DEPTH_MODE>(quality);
@@ -228,4 +227,5 @@ int main(int argc, char **argv)
     ZedPilotNode node;
     node.init();
     node.spin();
+    node.shutdown();
 }

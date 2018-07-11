@@ -8,7 +8,7 @@
 
 using namespace std;
 
-ZedPilot::ZedPilot() : stateImageSize(672, 376), serialNumber(0)
+ZedPilot::ZedPilot() : stateImageSize(672, 376), recordingEnabled(false), framesRecorded(0), serialNumber(0)
 {
     parameters.sdk_verbose = true;
     parameters.coordinate_units = sl::UNIT_METER;
@@ -56,6 +56,8 @@ void ZedPilot::open()
         warn(err);
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
+    if (!svoOutputPrefix.empty())
+        enableRecording();
     enableTracking();
 
     slLeftImage  = make_unique<sl::Mat>(camera.getResolution(), sl::MAT_TYPE_8U_C4, sl::MEM_CPU);
@@ -106,7 +108,29 @@ void ZedPilot::reopen()
         } else info("Waiting for the ZED to be re-connected");
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
+    if (!svoOutputPrefix.empty())
+        enableRecording();
     camera.enableTracking();
+}
+
+void ZedPilot::enableRecording()
+{
+    std::ostringstream oss;
+    auto t = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    oss << std::put_time(&tm, "%Y_%m_%d__%H_%M_%S.svo");
+    auto path = svoOutputPrefix + oss.str();
+
+    auto err = camera.enableRecording(path.c_str(), sl::SVO_COMPRESSION_MODE_LOSSY);
+
+    if (err != sl::SUCCESS) {
+        string message = string("SVO recording initialization error: ") + sl::toString(err).c_str();
+        warn(message);
+        if (err == sl::ERROR_CODE_SVO_RECORDING_ERROR)
+            info(" Note : This error mostly comes from a wrong path or missing writing permissions.");
+    }
+    else
+        recordingEnabled = true;
 }
 
 sl::DeviceProperties ZedPilot::zedFromSN()
@@ -157,7 +181,6 @@ void ZedPilot::publishStateImage(const cv::Mat &stateImage)
 #endif
 }
 
-
 void ZedPilot::grab()
 {
     auto grabStatus = camera.grab(runtimeParameters);
@@ -174,8 +197,13 @@ void ZedPilot::grab()
         if (duration.count() > 5)
             reopen();
         return;
-    } else
+    } else {
         lastGrabTime = chrono::steady_clock::now();
+        if (recordingEnabled) {
+            camera.record();
+            framesRecorded++;
+        }
+    }
 
     processFrame();
 }
@@ -188,4 +216,11 @@ int ZedPilot::checkCameraReady()
         if (it.serial_number == serialNumber && it.camera_state == sl::CAMERA_STATE::CAMERA_STATE_AVAILABLE)
             id = it.id;
     return id;
+}
+
+void ZedPilot::shutdown()
+{
+    if (recordingEnabled)
+        camera.disableRecording();
+    camera.close();
 }
