@@ -134,7 +134,8 @@ void ZedPilot::processFrame()
 
 void ZedPilot::processStateImage()
 {
-    cv::resize(leftImage, stateImage, stateImageSize, 0, 0, cv::INTER_NEAREST);
+    cv::resize(leftImage, stateImage4, stateImageSize, 0, 0, cv::INTER_NEAREST);
+    cv::cvtColor(stateImage4, stateImage, cv::COLOR_RGBA2RGB);
 #ifdef SHOW_RESULT
     cv::imshow("State image", stateImage);
     cv::waitKey(1);
@@ -144,6 +145,16 @@ void ZedPilot::processStateImage()
 
 void ZedPilot::publishStateImage(const cv::Mat &stateImage)
 {
+#ifdef USE_GST
+    if (videoUdpTarget != "") {
+        if (!transmitter) {
+            string full = buildPipelineDesc(videoUdpTarget, stateImageSize, parameters.camera_fps);
+            info("cmd: gst-launch-1.0 -v " + full);
+            transmitter = make_unique<Pipeline>(stateImageSize, true, full, parameters.camera_fps);
+        }
+        transmitter->write(stateImage);
+    }
+#endif
 }
 
 

@@ -4,6 +4,9 @@
 #include <memory>
 #include <sl/Camera.hpp>
 #include <opencv2/core.hpp>
+#ifdef USE_GST
+#include <pipeline.h>
+#endif
 
 #include "pilot.h"
 
@@ -14,12 +17,16 @@ private:
     std::chrono::steady_clock::time_point lastGrabTime;
     std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
     cv::Mat leftImage, rightImage;
-    cv::Mat stateImage;
+    cv::Mat stateImage, stateImage4;
     cv::Size stateImageSize;
+#ifdef USE_GST
+    std::unique_ptr<Pipeline> transmitter;
+#endif
     void processFrame();
     void processStateImage();
 protected:
     Pilot pilot;
+    std::string videoUdpTarget;
     virtual void publishPose(sl::Pose &) {}
     virtual void publishStateImage(const cv::Mat &stateImage);
     virtual void warn(const std::string &message);

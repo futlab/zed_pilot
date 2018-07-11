@@ -94,6 +94,7 @@ void ZedPilotNode::init()
     nhp.param<string>("base_frame", baseFrameId, "base_frame");
     nhp.param<string>("camera_frame", cameraFrameId, "camera_frame");
 
+    nhp.getParam("video_udp_target", videoUdpTarget);
     nhp.getParam("resolution", resolution);
     nhp.getParam("quality", quality);
     parameters.depth_mode = static_cast<sl::DEPTH_MODE>(quality);

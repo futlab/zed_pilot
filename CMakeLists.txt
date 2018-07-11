@@ -3,6 +3,7 @@ project(zed_pilot)
 
 option(USE_ROS "Use ROS" ON)
 option(SHOW_RESULT "Show result" OFF)
+option(USE_GST "Use gstreamer" ON)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +22,13 @@ find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 if (${USE_ROS})
+    if(${USE_GST})
+        add_definitions(-DUSE_GST)
+        find_package(PkgConfig)
+        pkg_check_modules(GST REQUIRED
+            gstreamer-1.0>=1.4
+        )
+    endif()
     find_package(catkin REQUIRED COMPONENTS
         roscpp
         std_msgs
@@ -30,6 +38,7 @@ if (${USE_ROS})
         mavros_msgs
         image_transport
         tf2_ros
+        ros2gst
     )
     catkin_package(
         INCLUDE_DIRS include
@@ -47,7 +56,8 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${ZED_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS}
-  ${Eigen3_INCLUDE_DIRS}
+  ${Eigen3_INCLUDE_DIRS} 
+  ${GST_INCLUDE_DIRS}
   include
 )
 
