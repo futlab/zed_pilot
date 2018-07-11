@@ -2,9 +2,14 @@ cmake_minimum_required(VERSION 3.1)
 project(zed_pilot)
 
 option(USE_ROS "Use ROS" ON)
+option(SHOW_RESULT "Show result" OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(${SHOW_RESULT})
+  add_definitions(-DSHOW_RESULT)
+endif()
 
 ##############
 ## Packages ##
@@ -45,7 +50,7 @@ include_directories(
 )
 
 set(SOURCES
-    src/zed.cpp             include/zed.h
+    src/zedpilot.cpp        include/zedpilot.h
     src/pilot.cpp           include/pilot.h
     src/controllers.cpp     include/controllers.h
 )
