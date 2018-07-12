@@ -14,13 +14,13 @@ class ZedPilot
 {
 private:
     sl::Pose pose;
-    std::chrono::steady_clock::time_point lastGrabTime, nextStateImageTime;
+    std::chrono::steady_clock::time_point lastGrabTime, nextStateImageTime, svoRestartTime;
     std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
     cv::Mat leftImage, rightImage;
     cv::Mat stateImage, stateImage4;
     cv::Size stateImageSize;
-    bool recordingEnabled;
-    size_t framesRecorded;
+    bool svoRecordingEnabled;
+    size_t svoFramesRecorded, svoRecordNumber;
 #ifdef USE_GST
     std::unique_ptr<Pipeline> transmitter;
 #endif
@@ -29,7 +29,7 @@ private:
     void enableRecording();
 protected:
     Pilot pilot;
-    std::chrono::steady_clock::duration stateImagePeriod;
+    std::chrono::steady_clock::duration stateImagePeriod, svoMaxDuration;
     std::string videoUdpTarget, svoOutputPrefix;
     virtual void publishPose(sl::Pose &) {}
     virtual void publishStateImage(const cv::Mat &stateImage);

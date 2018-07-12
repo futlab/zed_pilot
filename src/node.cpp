@@ -79,7 +79,8 @@ void ZedPilotNode::init()
             sensingMode = sl::SENSING_MODE_STANDARD,
             rate = 60,
             gpuId = -1,
-            zedId = 0;
+            zedId = 0,
+            svoMaxRecord;
 
     string
             svoFilepath = "";
@@ -96,6 +97,8 @@ void ZedPilotNode::init()
 
     nhp.getParam("video_udp_target", videoUdpTarget);
     nhp.getParam("svo_output_prefix", svoOutputPrefix);
+    if (nhp.getParam("svo_max_record", svoMaxRecord))
+        svoMaxDuration = chrono::seconds{svoMaxRecord};
     nhp.getParam("resolution", resolution);
     nhp.getParam("quality", quality);
     parameters.depth_mode = static_cast<sl::DEPTH_MODE>(quality);

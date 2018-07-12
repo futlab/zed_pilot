@@ -8,7 +8,10 @@
 
 using namespace std;
 
-ZedPilot::ZedPilot() : stateImagePeriod(chrono::milliseconds{1000} / 15), stateImageSize(672, 376), recordingEnabled(false), framesRecorded(0), serialNumber(0)
+ZedPilot::ZedPilot() :
+    stateImagePeriod(chrono::milliseconds{1000} / 15), stateImageSize(672, 376),
+    svoMaxDuration(chrono::seconds{20}), svoRecordingEnabled(false), svoFramesRecorded(0), svoRecordNumber(0),
+    serialNumber(0)
 {
     parameters.sdk_verbose = true;
     parameters.coordinate_units = sl::UNIT_METER;
@@ -113,13 +116,28 @@ void ZedPilot::reopen()
     camera.enableTracking();
 }
 
+#include <sys/stat.h>
+#include <unistd.h>
+
+inline bool fileExists (const std::string& name) {
+  struct stat buffer;
+  return (stat (name.c_str(), &buffer) == 0);
+}
+
 void ZedPilot::enableRecording()
 {
     std::ostringstream oss;
     auto t = std::time(nullptr);
     auto tm = *std::localtime(&t);
-    oss << std::put_time(&tm, "%Y_%m_%d__%H_%M_%S.svo");
-    auto path = svoOutputPrefix + oss.str();
+    oss << std::put_time(&tm, "%Y_%m_%d-");//__%H_%M_%S.svo");
+    auto prefix = svoOutputPrefix + oss.str();
+
+    string path;
+    do {
+        path = prefix + to_string(++svoRecordNumber) + ".svo";
+    } while (fileExists(path));
+
+    info("Recording to " + path);
 
     auto err = camera.enableRecording(path.c_str(), sl::SVO_COMPRESSION_MODE_LOSSY);
 
@@ -130,7 +148,9 @@ void ZedPilot::enableRecording()
             info(" Note : This error mostly comes from a wrong path or missing writing permissions.");
     }
     else
-        recordingEnabled = true;
+        svoRecordingEnabled = true;
+    svoFramesRecorded = 0;
+    svoRestartTime = chrono::steady_clock::now() + svoMaxDuration;
 }
 
 sl::DeviceProperties ZedPilot::zedFromSN()
@@ -203,9 +223,15 @@ void ZedPilot::grab()
         return;
     } else {
         lastGrabTime = chrono::steady_clock::now();
-        if (recordingEnabled) {
-            camera.record();
-            framesRecorded++;
+        if (svoRecordingEnabled) {
+            if (lastGrabTime > svoRestartTime)
+            {
+                camera.disableRecording();
+                enableRecording();
+            } else {
+                camera.record();
+                svoFramesRecorded++;
+            }
         }
     }
 
@@ -224,7 +250,7 @@ int ZedPilot::checkCameraReady()
 
 void ZedPilot::shutdown()
 {
-    if (recordingEnabled)
+    if (svoRecordingEnabled)
         camera.disableRecording();
     camera.close();
 }
