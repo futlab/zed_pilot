@@ -37,17 +37,23 @@ private:
     bool lastArmed, lastConnected;
     string lastPCMode;
     float linearVelocityLimit, yawSpeedLimit;
+    bool attitudeMode;
+    int poseConfidence;
+    void setVelocitySP(const Twist &twist);
+    Quaternionf yawAttitude;
 public:
     Pilot();
     void drawState(cv::Mat &stateImage);
 
     // Slots
     void onState(bool connected, bool armed, bool guided, const std::string &pcMode);
-    void onPose(const Pose &pose, unsigned int confidence);
+    void onCameraPose(const Pose &pose, unsigned int confidence);
+    void onAttitude(const Quaternionf &attitude);
 
     // Signals
     function<void()> resetTracking;
-    function<void(const Twist &)> updateVelocitySP;
+    function<void(const Twist &)> signalVelocitySP;
+    function<void(const Quaternionf &, float)> signalAttitudeSP;
 };
 
 #endif // PILOT_H

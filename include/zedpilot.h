@@ -40,6 +40,7 @@ protected:
     virtual void infoOnce(const std::string &message);
     virtual void debug(const std::string &message);
     virtual void publishVelositySP(const Twist &twist) {}
+    virtual void publishAttitudeSP(const Quaternionf &attitude, float thrust) {}
     void infoOnce(sl::ERROR_CODE code);
     void warn(sl::ERROR_CODE code);
     unsigned int serialNumber;

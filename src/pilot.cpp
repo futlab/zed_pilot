@@ -2,9 +2,25 @@
 
 #include "../include/pilot.h"
 
+void Pilot::setVelocitySP(const Twist &twist)
+{
+    if(attitudeMode) {
+        float roll = twist.linear[0] * 0.3;
+        float pitch = twist.linear[1] * 0.3;
+        Quaternionf a =
+                AngleAxisf(roll, Vector3f::UnitX()) *
+                AngleAxisf(pitch, Vector3f::UnitY()) *
+                yawAttitude;
+        float thrust = -twist.linear[2];
+        signalAttitudeSP(a, thrust);
+    } else
+        signalVelocitySP(twist);
+}
+
 Pilot::Pilot() :
-    mode(PILOT_PASSIVE), lastArmed(false),
-    linearVelocityLimit(0.5), yawSpeedLimit(0.5)
+    mode(PILOT_PASSIVE), lastArmed(false), attitudeMode(false),
+    linearVelocityLimit(0.5), yawSpeedLimit(0.5),
+    poseConfidence(0)
 {
 
 }
@@ -21,6 +37,7 @@ void Pilot::drawState(cv::Mat &stateImage)
         cv::putText(stateImage, "S", modePoint, cv::FONT_HERSHEY_PLAIN, 7, cv::Scalar(0, 150, 0), 3);
         break;
     }
+    //cv::putText(stateImage, to_string(poseConfidence), cv::Point(modePoint.x + 40, modePoint.y), cv::FONT_HERSHEY_PLAIN, 5, cv::Scalar(0, poseConfidence * 2, 0));
     const auto &l = twist.linear;
     if (l.any()) {
         Vector2f l2, l2p;
@@ -45,12 +62,17 @@ void Pilot::onState(bool connected, bool armed, bool guided, const std::string &
         resetTracking();
 
     if (pcMode != lastPCMode) {
-        if (pcMode == "OFFBOARD") {
+        if (pcMode == "OFFBOARD" || pcMode == "GUIDED") {
+            targetPose = lastPose;
+            mode = PILOT_STABILIZED;
+        } else if (pcMode == "GUIDED_NOGPS") {
+            attitudeMode = true;
             targetPose = lastPose;
             mode = PILOT_STABILIZED;
         } else {
             mode = PILOT_PASSIVE;
             twist = Twist();
+            attitudeMode = false;
         }
     }
 
@@ -59,19 +81,26 @@ void Pilot::onState(bool connected, bool armed, bool guided, const std::string &
     lastConnected = lastConnected;
 }
 
-void Pilot::onPose(const Pose &pose, unsigned int confidence)
+void Pilot::onCameraPose(const Pose &pose, unsigned int confidence)
 {
     lastPose = pose;
+    poseConfidence = confidence;
     switch (mode) {
     case PILOT_PASSIVE:
-        updateVelocitySP(twist);
+        setVelocitySP(twist);
         break;
     case PILOT_STABILIZED:
-        twist.linear = (targetPose.position - pose.position) * 0.2;
+        twist.linear = (targetPose.position - pose.position) * 0.4;
         auto norm = twist.linear.norm();
         if (norm > linearVelocityLimit)
             twist.linear /= (norm / linearVelocityLimit);
-        updateVelocitySP(twist);
+        setVelocitySP(twist);
         break;
     }
+}
+
+void Pilot::onAttitude(const Quaternionf &attitude)
+{
+    auto euler = attitude.toRotationMatrix().eulerAngles(0, 1, 2);
+    yawAttitude = AngleAxisf(euler[2], Vector3f::UnitZ());
 }

@@ -25,8 +25,11 @@ ZedPilot::ZedPilot() :
         camera.resetTracking(sl::Transform());
     };
 
-    pilot.updateVelocitySP = [this](const Twist &twist) {
+    pilot.signalVelocitySP = [this](const Twist &twist) {
         publishVelositySP(twist);
+    };
+    pilot.signalAttitudeSP = [this](const Quaternionf &attitude, float thrust) {
+        publishAttitudeSP(attitude, thrust);
     };
 }
 
@@ -179,7 +182,7 @@ void ZedPilot::processZedPose()
     camera.getPosition(pose);
     pilotPose.orientation = Map<const Quaternionf>(pose.getOrientation().ptr());
     pilotPose.position = Map<const Vector3f>(pose.getTranslation().ptr());
-    pilot.onPose(pilotPose, pose.pose_confidence);
+    pilot.onCameraPose(pilotPose, pose.pose_confidence);
     publishPose(pose);
 }
 

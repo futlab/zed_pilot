@@ -5,6 +5,8 @@
 // ROS includes
 #include <ros/ros.h>
 #include <geometry_msgs/TwistStamped.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <mavros_msgs/Thrust.h>
 #ifdef MSG_GEN
 #include <zed_pilot/ZedState.h>
 #else
@@ -25,8 +27,8 @@ class ZedPilotNode : public ZedPilot
 {
 private:
     ros::NodeHandle nh, nhp;
-    ros::Publisher odometryPub, velocitySpPub, statePub;
-    ros::Subscriber mavStateSub;
+    ros::Publisher odometryPub, velocitySpPub, attitudeSpPub, thrustPub, statePub;
+    ros::Subscriber mavStateSub, mavPoseSub;
     string odometryFrameId, baseFrameId, cameraFrameId;
     unique_ptr<tf2_ros::Buffer> tfBuffer;
     bool publishTf;
@@ -34,13 +36,16 @@ private:
     tf2_ros::TransformBroadcaster transformOdomBroadcaster;
     ros::Time grabTime;
     geometry_msgs::TwistStamped velocitySP;
+    geometry_msgs::PoseStamped attitudeSP;
+    mavros_msgs::Thrust thrustMsg;
 
     void publishOdom(tf2::Transform base_transform, string odomFrame, ros::Time t);
     void publishTrackedFrame(tf2::Transform base_transform, tf2_ros::TransformBroadcaster &trans_br, string odometryTransformFrameId, ros::Time t);
     void publishState();
     void advertise();
     void subscribe();
-    void MavStateCallback(const mavros_msgs::State::ConstPtr &state);
+    void mavStateCallback(const mavros_msgs::State::ConstPtr &state);
+    void mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose);
 protected:
     void fatal(const std::string &message)      { ROS_FATAL("%s", message.c_str()); }
     void warn(const std::string &message)       { ROS_WARN("%s", message.c_str()); }
@@ -50,6 +55,7 @@ protected:
 
     void publishPose(sl::Pose &pose);
     void publishVelositySP(const Twist &twist);
+    void publishAttitudeSP(const Quaternionf &attitude, float thrust);
 public:
     ZedPilotNode() : nhp("~") {}
     void init();
@@ -69,6 +75,14 @@ void ZedPilotNode::advertise()
     velocitySpPub = nh.advertise<geometry_msgs::TwistStamped>(twistTopic, 1);
     ROS_INFO_STREAM("Advertised on topic " << twistTopic);
 
+    string attitudeTopic = "mavros/setpoint_attitude/attitude";
+    attitudeSpPub = nh.advertise<geometry_msgs::PoseStamped>(attitudeTopic, 1);
+    ROS_INFO_STREAM("Advertised on topic " << attitudeTopic);
+
+    string thrustTopic = "mavros/setpoint_attitude/thrust";
+    thrustPub = nh.advertise<mavros_msgs::Thrust>(thrustTopic, 1);
+    ROS_INFO_STREAM("Advertised on topic " << thrustTopic);
+
     string stateTopic = "state";
 #ifdef GEM_MSG
     statePub = nh.advertise<zed_pilot::ZedState>(stateTopic, 1);
@@ -80,12 +94,19 @@ void ZedPilotNode::advertise()
 
 void ZedPilotNode::subscribe()
 {
-    mavStateSub = nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ZedPilotNode::MavStateCallback, this);
+    mavStateSub = nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ZedPilotNode::mavStateCallback, this);
+    mavPoseSub  = nh.subscribe<geometry_msgs::PoseStamped>("mavros/local_position/pose", 1, &ZedPilotNode::mavPoseCallback, this);
 }
 
-void ZedPilotNode::MavStateCallback(const mavros_msgs::State::ConstPtr &state)
+void ZedPilotNode::mavStateCallback(const mavros_msgs::State::ConstPtr &state)
 {
     pilot.onState(state->connected, state->armed, state->guided, state->mode);
+}
+
+void ZedPilotNode::mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose)
+{
+    auto &o = pose->pose.orientation;
+    pilot.onAttitude(Quaternionf(o.x, o.y, o.z, o.w));
 }
 
 void ZedPilotNode::init()
@@ -223,6 +244,22 @@ void ZedPilotNode::publishVelositySP(const Twist &twist)
     a.y = twist.angular[1];
     a.z = twist.angular[2];
     velocitySpPub.publish(velocitySP);
+}
+
+void ZedPilotNode::publishAttitudeSP(const Quaternionf &attitude, float thrust)
+{
+    attitudeSP.header.stamp = ros::Time::now();
+    attitudeSP.header.seq++;
+    auto &o = attitudeSP.pose.orientation;
+    o.x = attitude.x();
+    o.y = attitude.y();
+    o.z = attitude.z();
+    o.w = attitude.w();
+    thrustMsg.header.stamp = attitudeSP.header.stamp;
+    thrustMsg.header.seq = attitudeSP.header.seq;
+    thrustMsg.thrust = thrust;
+    attitudeSpPub.publish(attitudeSP);
+    thrustPub.publish(thrustMsg);
 }
 
 void ZedPilotNode::publishOdom(tf2::Transform baseTransform, string odomFrame, ros::Time t) {
