@@ -84,6 +84,8 @@ void ZedPilotNode::init()
     string
             svoFilepath = "";
 
+    double outFps;
+
     // Get parameters
 
     // Set  default coordinate frames
@@ -101,6 +103,8 @@ void ZedPilotNode::init()
     runtimeParameters.sensing_mode = static_cast<sl::SENSING_MODE>(sensingMode);
     nhp.getParam("frame_rate", rate);
     parameters.camera_fps = rate;
+    if (nhp.getParam("out_fps", outFps))
+        stateImagePeriod = chrono::milliseconds{int(1000 / outFps)};
     string odometryDB;
     nhp.getParam("odometry_DB", odometryDB);
     trackingParameters.area_file_path = odometryDB.c_str();

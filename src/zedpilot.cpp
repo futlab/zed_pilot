@@ -8,7 +8,7 @@
 
 using namespace std;
 
-ZedPilot::ZedPilot() : stateImageSize(672, 376), recordingEnabled(false), framesRecorded(0), serialNumber(0)
+ZedPilot::ZedPilot() : stateImagePeriod(chrono::milliseconds{1000} / 15), stateImageSize(672, 376), recordingEnabled(false), framesRecorded(0), serialNumber(0)
 {
     parameters.sdk_verbose = true;
     parameters.coordinate_units = sl::UNIT_METER;
@@ -158,6 +158,10 @@ void ZedPilot::processFrame()
 
 void ZedPilot::processStateImage()
 {
+    auto now = chrono::steady_clock::now();
+    if (now < nextStateImageTime)
+        return;
+    nextStateImageTime = now + stateImagePeriod;
     cv::resize(leftImage, stateImage4, stateImageSize, 0, 0, cv::INTER_NEAREST);
     cv::cvtColor(stateImage4, stateImage, cv::COLOR_RGBA2RGB);
 #ifdef SHOW_RESULT

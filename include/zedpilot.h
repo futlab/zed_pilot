@@ -14,7 +14,7 @@ class ZedPilot
 {
 private:
     sl::Pose pose;
-    std::chrono::steady_clock::time_point lastGrabTime;
+    std::chrono::steady_clock::time_point lastGrabTime, nextStateImageTime;
     std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
     cv::Mat leftImage, rightImage;
     cv::Mat stateImage, stateImage4;
@@ -29,6 +29,7 @@ private:
     void enableRecording();
 protected:
     Pilot pilot;
+    std::chrono::steady_clock::duration stateImagePeriod;
     std::string videoUdpTarget, svoOutputPrefix;
     virtual void publishPose(sl::Pose &) {}
     virtual void publishStateImage(const cv::Mat &stateImage);
