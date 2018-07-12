@@ -19,8 +19,6 @@ private:
     cv::Mat leftImage, rightImage;
     cv::Mat stateImage, stateImage4;
     cv::Size stateImageSize;
-    bool svoRecordingEnabled;
-    size_t svoFramesRecorded, svoRecordNumber;
 #ifdef USE_GST
     std::unique_ptr<Pipeline> transmitter;
 #endif
@@ -28,6 +26,8 @@ private:
     void processStateImage();
     void enableRecording();
 protected:
+    bool svoRecordingEnabled;
+    size_t svoFramesRecorded, svoRecordNumber;
     Pilot pilot;
     std::chrono::steady_clock::duration stateImagePeriod, svoMaxDuration;
     std::string videoUdpTarget, svoOutputPrefix;

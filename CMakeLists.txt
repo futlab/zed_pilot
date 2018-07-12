@@ -31,6 +31,7 @@ if (${USE_ROS})
     endif()
     find_package(catkin REQUIRED COMPONENTS
         roscpp
+        message_generation
         std_msgs
         sensor_msgs
         stereo_msgs
@@ -40,10 +41,19 @@ if (${USE_ROS})
         tf2_ros
         ros2gst
     )
+    add_message_files(
+       FILES
+       ZedState.msg
+    )
+    generate_messages(
+        DEPENDENCIES
+        std_msgs
+    )
+
     catkin_package(
         INCLUDE_DIRS include
     #  LIBRARIES autopilot
-        CATKIN_DEPENDS mavros_msgs roscpp rospy std_msgs sensor_msgs stereo_msgs cv_bridge
+        CATKIN_DEPENDS mavros_msgs roscpp rospy std_msgs sensor_msgs stereo_msgs cv_bridge message_runtime
     #  DEPENDS system_lib
     )
 endif()

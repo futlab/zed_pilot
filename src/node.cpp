@@ -5,6 +5,7 @@
 // ROS includes
 #include <ros/ros.h>
 #include <geometry_msgs/TwistStamped.h>
+#include <zed_pilot/ZedState.h>
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/State.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -20,7 +21,7 @@ class ZedPilotNode : public ZedPilot
 {
 private:
     ros::NodeHandle nh, nhp;
-    ros::Publisher odometryPub, velocitySpPub;
+    ros::Publisher odometryPub, velocitySpPub, statePub;
     ros::Subscriber mavStateSub;
     string odometryFrameId, baseFrameId, cameraFrameId;
     unique_ptr<tf2_ros::Buffer> tfBuffer;
@@ -31,6 +32,7 @@ private:
 
     void publishOdom(tf2::Transform base_transform, string odomFrame, ros::Time t);
     void publishTrackedFrame(tf2::Transform base_transform, tf2_ros::TransformBroadcaster &trans_br, string odometryTransformFrameId, ros::Time t);
+    void publishState();
     void advertise();
     void subscribe();
     void MavStateCallback(const mavros_msgs::State::ConstPtr &state);
@@ -54,10 +56,17 @@ protected:
 void ZedPilotNode::advertise()
 {
     string odometryTopic = "odom";
-    odometryPub = nh.advertise<nav_msgs::Odometry>(odometryTopic, 1);
     nhp.getParam("odometry_topic", odometryTopic);
+    odometryPub = nh.advertise<nav_msgs::Odometry>(odometryTopic, 1);
     ROS_INFO_STREAM("Advertised on topic " << odometryTopic);
-    velocitySpPub = nh.advertise<geometry_msgs::TwistStamped>("mavros/setpoint_velocity/cmd_vel", 1);
+
+    string twistTopic = "mavros/setpoint_velocity/cmd_vel";
+    velocitySpPub = nh.advertise<geometry_msgs::TwistStamped>(twistTopic, 1);
+    ROS_INFO_STREAM("Advertised on topic " << twistTopic);
+
+    string stateTopic = "state";
+    statePub = nh.advertise<zed_pilot::ZedState>(stateTopic, 1);
+    ROS_INFO_STREAM("Advertised on topic " << stateTopic);
 }
 
 void ZedPilotNode::subscribe()
@@ -143,6 +152,7 @@ void ZedPilotNode::spin()
         grabTime = ros::Time::now(); // Get current time
 
         grab();
+        publishState();
 
         // Look up the transformation from base frame to camera link
         try {
@@ -226,6 +236,21 @@ void ZedPilotNode::publishTrackedFrame(tf2::Transform baseTransform, tf2_ros::Tr
     transformStamped.transform = tf2::toMsg(baseTransform);
     // Publish transformation
     trans_br.sendTransform(transformStamped);
+}
+
+void ZedPilotNode::publishState()
+{
+    zed_pilot::ZedState state;
+    state.header.stamp = ros::Time::now();
+    state.fps = camera.getCurrentFPS();
+    if (svoRecordingEnabled) {
+        state.svoFrame = svoFramesRecorded;
+        state.svoRecordNumber = svoRecordNumber;
+    } else {
+        state.svoFrame = camera.getSVOPosition();
+        state.svoRecordNumber = -1;
+    }
+    statePub.publish(state);
 }
 
 int main(int argc, char **argv)
