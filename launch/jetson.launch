@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="udp_target" default="127.0.0.1"/>
-    <arg name="svo_output_prefix" default=""/>
+    <arg name="svo_output_prefix" default="/home/nvidia/svo/rec"/>
     <arg name="log_output" default="screen" />
     <arg name="svo_filepath" default=""/>
     <node name="pilot" pkg="zed_pilot" type="pilot_node" output="$(arg log_output)">

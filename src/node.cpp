@@ -132,7 +132,7 @@ void ZedPilotNode::spin()
 {
     ros::Time oldT;
     ros::Rate loopRate(parameters.camera_fps);
-    while(nhp.ok()) {
+    while(ros::ok()) {
         grabTime = ros::Time::now(); // Get current time
 
         grab();
