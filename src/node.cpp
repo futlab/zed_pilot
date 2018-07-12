@@ -5,7 +5,11 @@
 // ROS includes
 #include <ros/ros.h>
 #include <geometry_msgs/TwistStamped.h>
+#ifdef MSG_GEN
 #include <zed_pilot/ZedState.h>
+#else
+#include <std_msgs/String.h>
+#endif
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/State.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -29,6 +33,7 @@ private:
     tf2::Transform baseToSensor, baseTransform;
     tf2_ros::TransformBroadcaster transformOdomBroadcaster;
     ros::Time grabTime;
+    geometry_msgs::TwistStamped velocitySP;
 
     void publishOdom(tf2::Transform base_transform, string odomFrame, ros::Time t);
     void publishTrackedFrame(tf2::Transform base_transform, tf2_ros::TransformBroadcaster &trans_br, string odometryTransformFrameId, ros::Time t);
@@ -37,18 +42,18 @@ private:
     void subscribe();
     void MavStateCallback(const mavros_msgs::State::ConstPtr &state);
 protected:
-    void warn(const std::string &message) { ROS_WARN("%s", message.c_str()); }
-    void info(const std::string &message) { ROS_INFO("%s", message.c_str()); }
-    void infoOnce(const std::string &message) { ROS_INFO_ONCE("%s", message.c_str()); }
-    void debug(const std::string &message) { ROS_DEBUG("%s", message.c_str()); }
+    void fatal(const std::string &message)      { ROS_FATAL("%s", message.c_str()); }
+    void warn(const std::string &message)       { ROS_WARN("%s", message.c_str()); }
+    void info(const std::string &message)       { ROS_INFO("%s", message.c_str()); }
+    void infoOnce(const std::string &message)   { ROS_INFO_ONCE("%s", message.c_str()); }
+    void debug(const std::string &message)      { ROS_DEBUG("%s", message.c_str()); }
+
+    void publishPose(sl::Pose &pose);
+    void publishVelositySP(const Twist &twist);
 public:
     ZedPilotNode() : nhp("~") {}
     void init();
     void spin();
-
-    // ZedPilot interface
-protected:
-    void publishPose(sl::Pose &pose);
 };
 
 
@@ -65,7 +70,11 @@ void ZedPilotNode::advertise()
     ROS_INFO_STREAM("Advertised on topic " << twistTopic);
 
     string stateTopic = "state";
+#ifdef GEM_MSG
     statePub = nh.advertise<zed_pilot::ZedState>(stateTopic, 1);
+#else
+    statePub = nh.advertise<std_msgs::String>(stateTopic, 1);
+#endif
     ROS_INFO_STREAM("Advertised on topic " << stateTopic);
 }
 
@@ -202,6 +211,20 @@ void ZedPilotNode::publishPose(sl::Pose &pose)
     }
 }
 
+void ZedPilotNode::publishVelositySP(const Twist &twist)
+{
+    velocitySP.header.stamp = ros::Time::now();
+    velocitySP.header.seq++;
+    auto &l = velocitySP.twist.linear, &a = velocitySP.twist.angular;
+    l.x = twist.linear[0];
+    l.y = twist.linear[1];
+    l.z = twist.linear[2];
+    a.x = twist.angular[0];
+    a.y = twist.angular[1];
+    a.z = twist.angular[2];
+    velocitySpPub.publish(velocitySP);
+}
+
 void ZedPilotNode::publishOdom(tf2::Transform baseTransform, string odomFrame, ros::Time t) {
     nav_msgs::Odometry odom;
     odom.header.stamp = t;
@@ -240,9 +263,11 @@ void ZedPilotNode::publishTrackedFrame(tf2::Transform baseTransform, tf2_ros::Tr
 
 void ZedPilotNode::publishState()
 {
+#ifdef GEM_MSG
     zed_pilot::ZedState state;
     state.header.stamp = ros::Time::now();
     state.fps = camera.getCurrentFPS();
+    state.poseConfidence = (unsigned char)pose.pose_confidence;
     if (svoRecordingEnabled) {
         state.svoFrame = svoFramesRecorded;
         state.svoRecordNumber = svoRecordNumber;
@@ -250,6 +275,19 @@ void ZedPilotNode::publishState()
         state.svoFrame = camera.getSVOPosition();
         state.svoRecordNumber = -1;
     }
+#else
+    string stateStr;
+    stateStr += "fps: " + to_string(camera.getCurrentFPS());
+    stateStr += "\nconf:" + to_string(pose.pose_confidence);
+    if (svoRecordingEnabled) {
+        stateStr += "\nsvoFrame: " + to_string(svoFramesRecorded);
+        stateStr += "\nsvoRecordNumber: " + to_string(svoRecordNumber);
+    } else {
+        stateStr += "\nsvoFrame: " + camera.getSVOPosition();
+    }
+    std_msgs::String state;
+    state.data = stateStr;
+#endif
     statePub.publish(state);
 }
 

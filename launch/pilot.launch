@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="udp_target" default="127.0.0.1"/>
+    <arg name="udp_listen" default="127.0.0.1"/>
     <arg name="svo_output_prefix" default=""/>
     <arg name="log_output" default="screen" />
     <arg name="svo_filepath" default=""/>
@@ -10,4 +11,20 @@
         <param name="svo_output_prefix" value="$(arg svo_output_prefix)"/>
         <param name="svo_filepath" value="$(arg svo_filepath)"/>
     </node>
+
+    <arg name="fcu_url" default="/dev/ttyACM0:921600" />
+    <arg name="tgt_system" default="1" />
+    <arg name="tgt_component" default="1" />
+
+    <include file="$(find mavros)/launch/node.launch">
+        <arg name="pluginlists_yaml" value="$(find mavros)/launch/px4_pluginlists.yaml" />
+        <arg name="config_yaml" value="$(find mavros)/launch/px4_config.yaml" />
+
+        <arg name="fcu_url" value="$(arg fcu_url)" />
+        <arg name="gcs_url" value="udp://$(arg udp_listen):14551@$(arg udp_target):14569" />
+        <arg name="tgt_system" value="$(arg tgt_system)" />
+        <arg name="tgt_component" value="$(arg tgt_component)" />
+        <arg name="log_output" value="screen" />
+    </include>
+
 </launch>

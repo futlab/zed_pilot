@@ -13,7 +13,6 @@
 class ZedPilot
 {
 private:
-    sl::Pose pose;
     std::chrono::steady_clock::time_point lastGrabTime, nextStateImageTime, svoRestartTime;
     std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
     cv::Mat leftImage, rightImage;
@@ -25,7 +24,9 @@ private:
     void processFrame();
     void processStateImage();
     void enableRecording();
+    void processZedPose();
 protected:
+    sl::Pose pose;
     bool svoRecordingEnabled;
     size_t svoFramesRecorded, svoRecordNumber;
     Pilot pilot;
@@ -33,10 +34,12 @@ protected:
     std::string videoUdpTarget, svoOutputPrefix;
     virtual void publishPose(sl::Pose &) {}
     virtual void publishStateImage(const cv::Mat &stateImage);
+    virtual void fatal(const std::string &message);
     virtual void warn(const std::string &message);
     virtual void info(const std::string &message);
     virtual void infoOnce(const std::string &message);
     virtual void debug(const std::string &message);
+    virtual void publishVelositySP(const Twist &twist) {}
     void infoOnce(sl::ERROR_CODE code);
     void warn(sl::ERROR_CODE code);
     unsigned int serialNumber;

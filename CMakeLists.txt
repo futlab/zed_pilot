@@ -4,6 +4,7 @@ project(zed_pilot)
 option(USE_ROS "Use ROS" ON)
 option(SHOW_RESULT "Show result" OFF)
 option(USE_GST "Use gstreamer" ON)
+option(MSG_GEN "Generate message" OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +20,10 @@ endif()
 find_package(ZED 2 REQUIRED)
 find_package(CUDA ${ZED_CUDA_VERSION} EXACT REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(Eigen3 REQUIRED)
+
+if(NOT DEFINED ${Eigen3_INCLUDE_DIRS})
+    find_package(Eigen3 REQUIRED)
+endif()
 
 if (${USE_ROS})
     if(${USE_GST})
@@ -41,14 +45,16 @@ if (${USE_ROS})
         tf2_ros
         ros2gst
     )
-    add_message_files(
-       FILES
-       ZedState.msg
-    )
-    generate_messages(
-        DEPENDENCIES
-        std_msgs
-    )
+    if (${MSG_GEN})
+        add_message_files(
+           FILES
+           ZedState.msg
+        )
+        generate_messages(
+            #DEPENDENCIES
+            #std_msgs
+        )
+    endif()
 
     catkin_package(
         INCLUDE_DIRS include
@@ -66,7 +72,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${ZED_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS}
-  ${Eigen3_INCLUDE_DIRS} 
+  ${Eigen3_INCLUDE_DIRS}
   ${GST_INCLUDE_DIRS}
   include
 )

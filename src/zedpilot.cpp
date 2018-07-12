@@ -20,14 +20,23 @@ ZedPilot::ZedPilot() :
     trackingParameters.enable_spatial_memory = true;
 
     runtimeParameters.enable_depth = true;
+
+    pilot.resetTracking = [this]() {
+        camera.resetTracking(sl::Transform());
+    };
+
+    pilot.updateVelocitySP = [this](const Twist &twist) {
+        publishVelositySP(twist);
+    };
 }
 
-void ZedPilot::warn(const std::string &message) { cout << "WARNING: " << message << endl; }
-void ZedPilot::info(const string &message)      { cout << "INFO: " << message << endl; }
-void ZedPilot::infoOnce(const string &message)  { cout << "INFO: " << message << endl; }
-void ZedPilot::debug(const string &message)     { cout << "DEBUG: " << message << endl; }
-void ZedPilot::warn(sl::ERROR_CODE code)        { warn(sl::toString(code).c_str()); }
-void ZedPilot::infoOnce(sl::ERROR_CODE code)    { infoOnce(sl::toString(code).c_str()); }
+void ZedPilot::fatal(const std::string &message) { cout << "FATAL: " << message << endl; }
+void ZedPilot::warn(const std::string &message)  { cout << "WARNING: " << message << endl; }
+void ZedPilot::info(const string &message)       { cout << "INFO: " << message << endl; }
+void ZedPilot::infoOnce(const string &message)   { cout << "INFO: " << message << endl; }
+void ZedPilot::debug(const string &message)      { cout << "DEBUG: " << message << endl; }
+void ZedPilot::warn(sl::ERROR_CODE code)         { warn(sl::toString(code).c_str()); }
+void ZedPilot::infoOnce(sl::ERROR_CODE code)     { infoOnce(sl::toString(code).c_str()); }
 
 cv::Mat slMat2cvMat(sl::Mat& input)
 {
@@ -164,15 +173,23 @@ sl::DeviceProperties ZedPilot::zedFromSN()
     return prop;
 }
 
+void ZedPilot::processZedPose()
+{
+    Pose pilotPose;
+    camera.getPosition(pose);
+    pilotPose.orientation = Map<const Quaternionf>(pose.getOrientation().ptr());
+    pilotPose.position = Map<const Vector3f>(pose.getTranslation().ptr());
+    pilot.onPose(pilotPose, pose.pose_confidence);
+    publishPose(pose);
+}
+
 void ZedPilot::processFrame()
 {
     assert(slLeftImage && slRightImage);
     camera.retrieveImage(*slLeftImage, sl::VIEW_LEFT, sl::MEM_CPU);
     camera.retrieveImage(*slRightImage, sl::VIEW_RIGHT, sl::MEM_CPU);
 
-    camera.getPosition(pose);
-    publishPose(pose);
-
+    processZedPose();
     processStateImage();
 }
 
@@ -184,6 +201,8 @@ void ZedPilot::processStateImage()
     nextStateImageTime = now + stateImagePeriod;
     cv::resize(leftImage, stateImage4, stateImageSize, 0, 0, cv::INTER_NEAREST);
     cv::cvtColor(stateImage4, stateImage, cv::COLOR_RGBA2RGB);
+
+    pilot.drawState(stateImage);
 #ifdef SHOW_RESULT
     cv::imshow("State image", stateImage);
     cv::waitKey(1);
@@ -196,9 +215,10 @@ void ZedPilot::publishStateImage(const cv::Mat &stateImage)
 #ifdef USE_GST
     if (videoUdpTarget != "") {
         if (!transmitter) {
-            string full = buildPipelineDesc(videoUdpTarget, stateImageSize, parameters.camera_fps);
+            int fps = chrono::seconds{1} / stateImagePeriod;
+            string full = buildPipelineDesc(videoUdpTarget, stateImageSize, fps);
             info("cmd: gst-launch-1.0 -v " + full);
-            transmitter = make_unique<Pipeline>(stateImageSize, true, full, parameters.camera_fps);
+            transmitter = make_unique<Pipeline>(stateImageSize, true, full, fps);
         }
         transmitter->write(stateImage);
     }
@@ -210,6 +230,13 @@ void ZedPilot::grab()
     auto grabStatus = camera.grab(runtimeParameters);
 
     if (grabStatus != sl::ERROR_CODE::SUCCESS) { // Detect if a error occurred (for example: the zed have been disconnected) and re-initialize the ZED
+
+        int svoSize = camera.getSVONumberOfFrames(), svoPos = camera.getSVOPosition();
+        if (svoSize >= 0 && svoPos >= svoSize) {
+            info("Reached SVO end, restarting...");
+            camera.setSVOPosition(0);
+            return;
+        }
 
         if (grabStatus == sl::ERROR_CODE_NOT_A_NEW_FRAME) {
             debug("Wait for a new image to proceed");
