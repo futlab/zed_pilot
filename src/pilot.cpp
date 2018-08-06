@@ -2,24 +2,12 @@
 
 #include "../include/pilot.h"
 
-void Pilot::setVelocitySP(const Twist &twist)
-{
-    if(attitudeMode) {
-        float roll = twist.linear[0] * 0.3;
-        float pitch = twist.linear[1] * 0.3;
-        Quaternionf a =
-                AngleAxisf(roll, Vector3f::UnitX()) *
-                AngleAxisf(pitch, Vector3f::UnitY()) *
-                yawAttitude;
-        float thrust = -twist.linear[2];
-        signalAttitudeSP(a, thrust);
-    } else
-        signalVelocitySP(twist);
-}
 
 Pilot::Pilot() :
-    mode(PILOT_PASSIVE), lastArmed(false), attitudeMode(false),
-    linearVelocityLimit(0.5), yawSpeedLimit(0.5),
+    mode(PILOT_PASSIVE), targetPose{ Quaternionf::Identity(), Vector3f::Zero() },
+    currentLinearCmd(Vector3f::Zero()), currentAngularCmd(Vector3f::Zero()),
+    lastArmed(false),
+    linearVelocityLimit(0.5), yawSpeedLimit(0.5), attitudeMode(false),
     poseConfidence(0)
 {
 
@@ -38,7 +26,7 @@ void Pilot::drawState(cv::Mat &stateImage)
         break;
     }
     //cv::putText(stateImage, to_string(poseConfidence), cv::Point(modePoint.x + 40, modePoint.y), cv::FONT_HERSHEY_PLAIN, 5, cv::Scalar(0, poseConfidence * 2, 0));
-    const auto &l = twist.linear;
+    const auto &l = currentLinearCmd;
     if (l.any()) {
         Vector2f l2, l2p;
         l2 << l[0], l[1];
@@ -55,48 +43,72 @@ void Pilot::drawState(cv::Mat &stateImage)
     }
 }
 
+void Pilot::reset()
+{
+    resetTracking();
+    targetPose.position = Vector3f::Zero();
+    targetPose.orientation = Quaternionf::Identity();
+    currentLinearCmd = Vector3f::Zero();
+    currentAngularCmd = Vector3f::Zero();
+}
+
 void Pilot::onState(bool connected, bool armed, bool guided, const std::string &pcMode)
 {
-    Twist t;
     if (!lastArmed && armed)
-        resetTracking();
+        reset();
 
     if (pcMode != lastPCMode) {
         if (pcMode == "OFFBOARD" || pcMode == "GUIDED") {
-            targetPose = lastPose;
+            reset();
             mode = PILOT_STABILIZED;
         } else if (pcMode == "GUIDED_NOGPS") {
+            reset();
             attitudeMode = true;
-            targetPose = lastPose;
             mode = PILOT_STABILIZED;
         } else {
             mode = PILOT_PASSIVE;
-            twist = Twist();
+            currentLinearCmd = Vector3f::Zero();
+            currentAngularCmd = Vector3f::Zero();
             attitudeMode = false;
         }
     }
 
     lastPCMode = pcMode;
     lastArmed = armed;
-    lastConnected = lastConnected;
+    lastConnected = connected;
 }
 
-void Pilot::onCameraPose(const Pose &pose, unsigned int confidence)
+void Pilot::onCameraPose(const Pose &pose, int confidence)
 {
     lastPose = pose;
     poseConfidence = confidence;
     switch (mode) {
     case PILOT_PASSIVE:
-        setVelocitySP(twist);
+        setVelocitySP(currentLinearCmd, currentAngularCmd);
         break;
-    case PILOT_STABILIZED:
-        twist.linear = (targetPose.position - pose.position) * 0.4;
-        auto norm = twist.linear.norm();
+    case PILOT_STABILIZED: // pose and targetPose in camera frame
+        currentLinearCmd = (targetPose.position - pose.position) * 0.4f;
+        auto norm = currentLinearCmd.norm();
         if (norm > linearVelocityLimit)
-            twist.linear /= (norm / linearVelocityLimit);
-        setVelocitySP(twist);
+            currentLinearCmd *= linearVelocityLimit / norm;
+        setVelocitySP(controlMatrix * currentLinearCmd, currentAngularCmd);
         break;
     }
+}
+
+void Pilot::setVelocitySP(const Vector3f &linear, const Vector3f &angular) // twist in FC frame
+{
+    if(attitudeMode) {
+        float roll = linear[0] * 0.3f;
+        float pitch = linear[1] * 0.3f;
+        Quaternionf a =
+                AngleAxisf(roll, Vector3f::UnitX()) *
+                AngleAxisf(pitch, Vector3f::UnitY()) *
+                yawAttitude;
+        float thrust = -linear[2];
+        signalAttitudeSP(a, thrust);
+    } else
+        signalVelocitySP(linear, angular);
 }
 
 void Pilot::onAttitude(const Quaternionf &attitude)

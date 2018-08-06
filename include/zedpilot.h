@@ -27,7 +27,7 @@ private:
     void processZedPose();
 protected:
     sl::Pose pose;
-    bool svoRecordingEnabled;
+    bool svoRecordingEnabled, controlEnabled, pause;
     size_t svoFramesRecorded, svoRecordNumber;
     Pilot pilot;
     std::chrono::steady_clock::duration stateImagePeriod, svoMaxDuration;
@@ -39,7 +39,7 @@ protected:
     virtual void info(const std::string &message);
     virtual void infoOnce(const std::string &message);
     virtual void debug(const std::string &message);
-    virtual void publishVelositySP(const Twist &twist) {}
+    virtual void publishVelositySP(const Vector3f &linear, const Vector3f &angular) {}
     virtual void publishAttitudeSP(const Quaternionf &attitude, float thrust) {}
     void infoOnce(sl::ERROR_CODE code);
     void warn(sl::ERROR_CODE code);
@@ -58,6 +58,7 @@ protected:
     int checkCameraReady();
 public:
     ZedPilot();
+    virtual ~ZedPilot();
     void shutdown();
 };
 

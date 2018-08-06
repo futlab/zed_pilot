@@ -10,7 +10,7 @@ using namespace std;
 
 ZedPilot::ZedPilot() :
     stateImagePeriod(chrono::milliseconds{1000} / 15), stateImageSize(672, 376),
-    svoMaxDuration(chrono::seconds{20}), svoRecordingEnabled(false), svoFramesRecorded(0), svoRecordNumber(0),
+    svoMaxDuration(chrono::seconds{20}), svoRecordingEnabled(false), controlEnabled(false), pause(false), svoFramesRecorded(0), svoRecordNumber(0),
     serialNumber(0)
 {
     parameters.sdk_verbose = true;
@@ -25,13 +25,17 @@ ZedPilot::ZedPilot() :
         camera.resetTracking(sl::Transform());
     };
 
-    pilot.signalVelocitySP = [this](const Twist &twist) {
-        publishVelositySP(twist);
+    pilot.signalVelocitySP = [this](const Vector3f &linear, const Vector3f &angular) {
+        if (controlEnabled)
+            publishVelositySP(linear, angular);
     };
     pilot.signalAttitudeSP = [this](const Quaternionf &attitude, float thrust) {
-        publishAttitudeSP(attitude, thrust);
+        if (controlEnabled)
+            publishAttitudeSP(attitude, thrust);
     };
 }
+
+ZedPilot::~ZedPilot() { }
 
 void ZedPilot::fatal(const std::string &message) { cout << "FATAL: " << message << endl; }
 void ZedPilot::warn(const std::string &message)  { cout << "WARNING: " << message << endl; }
@@ -60,7 +64,7 @@ cv::Mat slMat2cvMat(sl::Mat& input)
 
     // Since cv::Mat data requires a uchar* pointer, we get the uchar1 pointer from sl::Mat (getPtr<T>())
     // cv::Mat and sl::Mat will share a single memory structure
-    return cv::Mat((int)input.getHeight(), (int)input.getWidth(), cv_type, input.getPtr<sl::uchar1>(MEM_CPU));
+    return cv::Mat(int(input.getHeight()), int(input.getWidth()), cv_type, input.getPtr<sl::uchar1>(MEM_CPU));
 }
 
 void ZedPilot::open()
@@ -208,7 +212,11 @@ void ZedPilot::processStateImage()
     pilot.drawState(stateImage);
 #ifdef SHOW_RESULT
     cv::imshow("State image", stateImage);
-    cv::waitKey(1);
+    switch (cv::waitKey(1)) {
+    case 'p': pause = !pause; break;
+    case 'r': pilot.reset(); break;
+    default: break;
+    }
 #endif
     publishStateImage(stateImage);
 }
@@ -230,40 +238,46 @@ void ZedPilot::publishStateImage(const cv::Mat &stateImage)
 
 void ZedPilot::grab()
 {
-    auto grabStatus = camera.grab(runtimeParameters);
+#ifdef SHOW_RESULT
+    if (!pause) {
+#endif
+        auto grabStatus = camera.grab(runtimeParameters);
 
-    if (grabStatus != sl::ERROR_CODE::SUCCESS) { // Detect if a error occurred (for example: the zed have been disconnected) and re-initialize the ZED
+        if (grabStatus != sl::ERROR_CODE::SUCCESS) { // Detect if a error occurred (for example: the zed have been disconnected) and re-initialize the ZED
 
-        int svoSize = camera.getSVONumberOfFrames(), svoPos = camera.getSVOPosition();
-        if (svoSize >= 0 && svoPos >= svoSize) {
-            info("Reached SVO end, restarting...");
-            camera.setSVOPosition(0);
+            int svoSize = camera.getSVONumberOfFrames(), svoPos = camera.getSVOPosition();
+            if (svoSize >= 0 && svoPos >= svoSize) {
+                info("Reached SVO end, restarting...");
+                camera.setSVOPosition(0);
+                return;
+            }
+
+            if (grabStatus == sl::ERROR_CODE_NOT_A_NEW_FRAME) {
+                debug("Wait for a new image to proceed");
+            } else infoOnce(grabStatus);
+
+            this_thread::sleep_for(std::chrono::milliseconds(2));
+
+            std::chrono::duration<double> duration = chrono::steady_clock::now() - lastGrabTime;
+            if (duration.count() > 5)
+                reopen();
             return;
-        }
-
-        if (grabStatus == sl::ERROR_CODE_NOT_A_NEW_FRAME) {
-            debug("Wait for a new image to proceed");
-        } else infoOnce(grabStatus);
-
-        this_thread::sleep_for(std::chrono::milliseconds(2));
-
-        std::chrono::duration<double> duration = chrono::steady_clock::now() - lastGrabTime;
-        if (duration.count() > 5)
-            reopen();
-        return;
-    } else {
-        lastGrabTime = chrono::steady_clock::now();
-        if (svoRecordingEnabled) {
-            if (lastGrabTime > svoRestartTime)
-            {
-                camera.disableRecording();
-                enableRecording();
-            } else {
-                camera.record();
-                svoFramesRecorded++;
+        } else {
+            lastGrabTime = chrono::steady_clock::now();
+            if (svoRecordingEnabled) {
+                if (lastGrabTime > svoRestartTime)
+                {
+                    camera.disableRecording();
+                    enableRecording();
+                } else {
+                    camera.record();
+                    svoFramesRecorded++;
+                }
             }
         }
+#ifdef SHOW_RESULT
     }
+#endif
 
     processFrame();
 }

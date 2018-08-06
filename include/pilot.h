@@ -22,37 +22,34 @@ struct Pose
     Vector3f position;
 };
 
-struct Twist
-{
-    Vector3f linear, angular;
-    Twist() : linear(Vector3f::Zero()), angular(Vector3f::Zero()) {}
-};
-
 class Pilot
 {
 private:
     PilotMode mode;
     Pose lastPose, targetPose;
-    Twist twist;
+    Vector3f currentLinearCmd, currentAngularCmd; // In camera frame
     bool lastArmed, lastConnected;
     string lastPCMode;
     float linearVelocityLimit, yawSpeedLimit;
     bool attitudeMode;
     int poseConfidence;
-    void setVelocitySP(const Twist &twist);
+    void setVelocitySP(const Vector3f &linear, const Vector3f &angular);
     Quaternionf yawAttitude;
+    Matrix3f controlMatrix;
 public:
+    inline void setControlMatrix(const Matrix3f &cm) { controlMatrix = cm; }
     Pilot();
     void drawState(cv::Mat &stateImage);
+    void reset();
 
     // Slots
     void onState(bool connected, bool armed, bool guided, const std::string &pcMode);
-    void onCameraPose(const Pose &pose, unsigned int confidence);
+    void onCameraPose(const Pose &pose, int confidence);
     void onAttitude(const Quaternionf &attitude);
 
     // Signals
     function<void()> resetTracking;
-    function<void(const Twist &)> signalVelocitySP;
+    function<void(const Vector3f &, const Vector3f &)> signalVelocitySP;
     function<void(const Quaternionf &, float)> signalAttitudeSP;
 };
 
