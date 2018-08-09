@@ -26,6 +26,7 @@ class Pilot
 {
 private:
     PilotMode mode;
+    int lastValue = 0;
     Pose lastPose, targetPose;
     Vector3f currentLinearCmd, currentAngularCmd; // In camera frame
     bool lastArmed, lastConnected;
@@ -44,8 +45,11 @@ public:
 
     // Slots
     void onState(bool connected, bool armed, bool guided, const std::string &pcMode);
+    void onControl(int value);
     void onCameraPose(const Pose &pose, int confidence);
     void onAttitude(const Quaternionf &attitude);
+    void setShift(float x, float y, float z);
+    void addShift(float x, float y, float z);
 
     // Signals
     function<void()> resetTracking;

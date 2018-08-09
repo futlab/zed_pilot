@@ -9,8 +9,8 @@
 using namespace std;
 
 ZedPilot::ZedPilot() :
-    stateImagePeriod(chrono::milliseconds{1000} / 15), stateImageSize(672, 376),
-    svoMaxDuration(chrono::seconds{20}), svoRecordingEnabled(false), controlEnabled(false), pause(false), svoFramesRecorded(0), svoRecordNumber(0),
+    stateImageSize(672, 376), stateImagePeriod(chrono::milliseconds{1000} / 15),
+    svoFramesRecorded(0), svoRecordNumber(0), svoMaxDuration(chrono::seconds{20}),
     serialNumber(0)
 {
     parameters.sdk_verbose = true;
@@ -26,8 +26,17 @@ ZedPilot::ZedPilot() :
     };
 
     pilot.signalVelocitySP = [this](const Vector3f &linear, const Vector3f &angular) {
-        if (controlEnabled)
+        if (controlEnabled) switch (controlMode) {
+        case VelocityControlMode:
             publishVelositySP(linear, angular);
+            break;
+        case ManualControlMode:
+            publishManualControl(linear, angular);
+            break;
+        default:
+            warn("signalVelocitySP: wrong control mode!");
+            break;
+        }
     };
     pilot.signalAttitudeSP = [this](const Quaternionf &attitude, float thrust) {
         if (controlEnabled)
@@ -215,6 +224,12 @@ void ZedPilot::processStateImage()
     switch (cv::waitKey(1)) {
     case 'p': pause = !pause; break;
     case 'r': pilot.reset(); break;
+    case 'w': pilot.setShift(0, -1, 0); break;
+    case 's': pilot.setShift(0, 1, 0); break;
+    case 'a': pilot.setShift(-1, 0, 0); break;
+    case 'd': pilot.setShift(1, 0, 0); break;
+    case '+': pilot.addShift(0, 0, -0.2f); break;
+    case '-': pilot.addShift(0, 0, 0.2f); break;
     default: break;
     }
 #endif

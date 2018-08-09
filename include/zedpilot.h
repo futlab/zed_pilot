@@ -26,8 +26,13 @@ private:
     void enableRecording();
     void processZedPose();
 protected:
+    enum ControlMode {
+        ManualControlMode,
+        VelocityControlMode,
+        AttitudeControlMode
+    } controlMode = ManualControlMode;
     sl::Pose pose;
-    bool svoRecordingEnabled, controlEnabled, pause;
+    bool svoRecordingEnabled = false, controlEnabled = false, pause = false;
     size_t svoFramesRecorded, svoRecordNumber;
     Pilot pilot;
     std::chrono::steady_clock::duration stateImagePeriod, svoMaxDuration;
@@ -39,8 +44,9 @@ protected:
     virtual void info(const std::string &message);
     virtual void infoOnce(const std::string &message);
     virtual void debug(const std::string &message);
-    virtual void publishVelositySP(const Vector3f &linear, const Vector3f &angular) {}
-    virtual void publishAttitudeSP(const Quaternionf &attitude, float thrust) {}
+    virtual void publishVelositySP(const Vector3f &/*linear*/, const Vector3f &/*angular*/) {}
+    virtual void publishAttitudeSP(const Quaternionf &/*attitude*/, float /*thrust*/) {}
+    virtual void publishManualControl(const Vector3f &/*linear*/, const Vector3f &/*angular*/) {}
     void infoOnce(sl::ERROR_CODE code);
     void warn(sl::ERROR_CODE code);
     unsigned int serialNumber;

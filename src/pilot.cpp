@@ -57,8 +57,11 @@ void Pilot::onState(bool connected, bool armed, bool guided, const std::string &
     if (!lastArmed && armed)
         reset();
 
-    if (pcMode != lastPCMode) {
-        if (pcMode == "OFFBOARD" || pcMode == "GUIDED") {
+    /*if (pcMode != lastPCMode) {
+        if (pcMode == "ALT_HOLD") {
+            reset();
+            mode = PILOT_STABILIZED;
+        } else if (pcMode == "OFFBOARD" || pcMode == "GUIDED") {
             reset();
             mode = PILOT_STABILIZED;
         } else if (pcMode == "GUIDED_NOGPS") {
@@ -71,11 +74,31 @@ void Pilot::onState(bool connected, bool armed, bool guided, const std::string &
             currentAngularCmd = Vector3f::Zero();
             attitudeMode = false;
         }
-    }
+    }*/
 
     lastPCMode = pcMode;
     lastArmed = armed;
     lastConnected = connected;
+}
+
+void Pilot::onControl(int value)
+{
+    if (value != lastValue) {
+        switch (value) {
+        case 1:
+        case 2:
+            reset();
+            mode = PILOT_STABILIZED;
+            break;
+        case 0:
+            mode = PILOT_PASSIVE;
+            //currentLinearCmd = Vector3f::Zero();
+            //currentAngularCmd = Vector3f::Zero();
+            attitudeMode = false;
+            break;
+        }
+    }
+    lastValue = value;
 }
 
 void Pilot::onCameraPose(const Pose &pose, int confidence)
@@ -84,7 +107,9 @@ void Pilot::onCameraPose(const Pose &pose, int confidence)
     poseConfidence = confidence;
     switch (mode) {
     case PILOT_PASSIVE:
-        setVelocitySP(currentLinearCmd, currentAngularCmd);
+        /*currentLinearCmd *= 0.9f;
+        currentAngularCmd *= 0.9f;
+        setVelocitySP(currentLinearCmd, currentAngularCmd);*/
         break;
     case PILOT_STABILIZED: // pose and targetPose in camera frame
         currentLinearCmd = (targetPose.position - pose.position) * 0.4f;
@@ -95,6 +120,20 @@ void Pilot::onCameraPose(const Pose &pose, int confidence)
         break;
     }
 }
+
+void Pilot::setShift(float x, float y, float z)
+{
+    targetPose = lastPose;
+    Vector3f shift; shift << x, y, z;
+    targetPose.position += shift;
+}
+
+void Pilot::addShift(float x, float y, float z)
+{
+    Vector3f shift; shift << x, y, z;
+    targetPose.position += shift;
+}
+
 
 void Pilot::setVelocitySP(const Vector3f &linear, const Vector3f &angular) // twist in FC frame
 {
@@ -116,3 +155,4 @@ void Pilot::onAttitude(const Quaternionf &attitude)
     auto euler = attitude.toRotationMatrix().eulerAngles(0, 1, 2);
     yawAttitude = AngleAxisf(euler[2], Vector3f::UnitZ());
 }
+

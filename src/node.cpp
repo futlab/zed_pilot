@@ -14,9 +14,9 @@
 #endif
 #include <nav_msgs/Odometry.h>
 #include <mavros_msgs/State.h>
-//#include <mavros_msgs/SetMavFrameRequest.h>
-//#include <mavros_msgs/SetMavFrameResponse.h>
 #include <mavros_msgs/SetMavFrame.h>
+#include <mavros_msgs/ManualControl.h>
+#include <mavros_msgs/RCIn.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/buffer.h>
@@ -30,8 +30,8 @@ class ZedPilotNode : public ZedPilot
 {
 private:
     ros::NodeHandle nh, nhp;
-    ros::Publisher odometryPub, velocitySpPub, velocitySpUnstPub, attitudeSpPub, thrustPub, statePub;
-    ros::Subscriber mavStateSub, mavPoseSub;
+    ros::Publisher odometryPub, velocitySpPub, velocitySpUnstPub, attitudeSpPub, manualControlPub, thrustPub, statePub;
+    ros::Subscriber mavStateSub, mavPoseSub, rcInSub;
     string odometryFrameId, baseFrameId, cameraFrameId;
     unique_ptr<tf2_ros::Buffer> tfBuffer;
     bool publishTf;
@@ -41,16 +41,19 @@ private:
     geometry_msgs::TwistStamped velocitySP;
     geometry_msgs::PoseStamped attitudeSP;
     mavros_msgs::Thrust thrustMsg;
+    mavros_msgs::ManualControl manualControlMsg;
+    bool velocityStamped = false;
 
     void publishOdom(tf2::Transform base_transform, string odomFrame, ros::Time t);
     void publishTrackedFrame(tf2::Transform base_transform, tf2_ros::TransformBroadcaster &trans_br, string odometryTransformFrameId, ros::Time t);
     void publishState();
-    void setMavFrame();
-    void advertise();
+    bool setMavFrame();
+    bool advertise();
     void subscribe();
     void mavStateCallback(const mavros_msgs::State::ConstPtr &state);
     void mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose);
-    void setControlMatrix(const string &matrixString);
+    void rcInCallback(const mavros_msgs::RCIn::ConstPtr &rc);
+    bool setControlMatrix(const string &matrixString);
 
 protected:
     void fatal(const std::string &message)      { ROS_FATAL("%s", message.c_str()); }
@@ -62,36 +65,50 @@ protected:
     void publishPose(sl::Pose &pose);
     void publishVelositySP(const Vector3f &linear, const Vector3f &angular);
     void publishAttitudeSP(const Quaternionf &attitude, float thrust);
+    void publishManualControl(const Vector3f &linear, const Vector3f &angular);
 public:
     ZedPilotNode() : nhp("~") {}
-    void init();
+    bool init();
     void spin();
 };
 
 
 
-void ZedPilotNode::advertise()
+bool ZedPilotNode::advertise()
 {
     string odometryTopic = "odom";
     nhp.getParam("odometry_topic", odometryTopic);
     odometryPub = nh.advertise<nav_msgs::Odometry>(odometryTopic, 1);
     ROS_INFO_STREAM("Advertised on topic " << odometryTopic);
 
-    /*string twistTopic = "mavros/setpoint_velocity/cmd_vel";
-    velocitySpPub = nh.advertise<geometry_msgs::TwistStamped>(twistTopic, 1);
-    ROS_INFO_STREAM("Advertised on topic " << twistTopic);*/
+    string controlTopic;
+    switch (controlMode) {
+    case VelocityControlMode:
+        if (velocityStamped) {
+            controlTopic = "mavros/setpoint_velocity/cmd_vel";
+            velocitySpPub = nh.advertise<geometry_msgs::TwistStamped>(controlTopic, 1);
+        } else {
+            controlTopic = "mavros/setpoint_velocity/cmd_vel_unstamped";
+            velocitySpUnstPub = nh.advertise<geometry_msgs::Twist>(controlTopic, 1);
+        }
+        break;
+    case AttitudeControlMode:
+        controlTopic = "mavros/setpoint_attitude/attitude";
+        attitudeSpPub = nh.advertise<geometry_msgs::PoseStamped>(controlTopic, 1);
+        ROS_INFO_STREAM("Advertised on topic " << controlTopic);
 
-    string twistUnstTopic = "mavros/setpoint_velocity/cmd_vel_unstamped";
-    velocitySpUnstPub = nh.advertise<geometry_msgs::Twist>(twistUnstTopic, 1);
-    ROS_INFO_STREAM("Advertised on topic " << twistUnstTopic);
-
-    string attitudeTopic = "mavros/setpoint_attitude/attitude";
-    attitudeSpPub = nh.advertise<geometry_msgs::PoseStamped>(attitudeTopic, 1);
-    ROS_INFO_STREAM("Advertised on topic " << attitudeTopic);
-
-    string thrustTopic = "mavros/setpoint_attitude/thrust";
-    thrustPub = nh.advertise<mavros_msgs::Thrust>(thrustTopic, 1);
-    ROS_INFO_STREAM("Advertised on topic " << thrustTopic);
+        controlTopic = "mavros/setpoint_attitude/thrust";
+        thrustPub = nh.advertise<mavros_msgs::Thrust>(controlTopic, 1);
+        break;
+    case ManualControlMode:
+        controlTopic = "mavros/manual_control/send";
+        manualControlPub = nh.advertise<mavros_msgs::ManualControl>(controlTopic, 1);
+        break;
+    default:
+        ROS_FATAL("Unknown control mode!");
+        return false;
+    }
+    ROS_INFO_STREAM("Advertised on topic " << controlTopic);
 
     string stateTopic = "state";
 #ifdef GEM_MSG
@@ -100,12 +117,14 @@ void ZedPilotNode::advertise()
     statePub = nh.advertise<std_msgs::String>(stateTopic, 1);
 #endif
     ROS_INFO_STREAM("Advertised on topic " << stateTopic);
+    return true;
 }
 
 void ZedPilotNode::subscribe()
 {
     mavStateSub = nh.subscribe<mavros_msgs::State>("mavros/state", 1, &ZedPilotNode::mavStateCallback, this);
     mavPoseSub  = nh.subscribe<geometry_msgs::PoseStamped>("mavros/local_position/pose", 1, &ZedPilotNode::mavPoseCallback, this);
+    rcInSub     = nh.subscribe<mavros_msgs::RCIn>("/mavros/rc/in", 1, &ZedPilotNode::rcInCallback, this);
 }
 
 void ZedPilotNode::mavStateCallback(const mavros_msgs::State::ConstPtr &state)
@@ -113,18 +132,28 @@ void ZedPilotNode::mavStateCallback(const mavros_msgs::State::ConstPtr &state)
     pilot.onState(state->connected, state->armed, state->guided, state->mode);
 }
 
+void ZedPilotNode::rcInCallback(const mavros_msgs::RCIn::ConstPtr &rc)
+{
+    auto c = rc->channels[4];
+    int value = 0;
+    if (c > 1300) value = 1;
+    if (c > 1700) value = 2;
+    pilot.onControl(value);
+}
+
+
 void ZedPilotNode::mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose)
 {
     auto &o = pose->pose.orientation;
     pilot.onAttitude(Quaternionf(o.x, o.y, o.z, o.w));
 }
 
-void ZedPilotNode::setControlMatrix(const string &matrixString)
+bool ZedPilotNode::setControlMatrix(const string &matrixString)
 {
     if (matrixString.empty()) {
         controlEnabled = false;
         ROS_INFO("Control is disabled");
-        return;
+        return true;
     }
     Matrix3f cm = Matrix3f::Zero();
     enum { IN, VAL, OUT, END } mode = IN;
@@ -142,7 +171,7 @@ void ZedPilotNode::setControlMatrix(const string &matrixString)
                 break;
             default:
                 ROS_FATAL("Wrong control_mat: unexpected '%c'!", c);
-                return;
+                return false;
             }
         } else if (c == '.' || c == '-' || c == '+' || (c >= '0' && c <= '9')) {
             if (mode == VAL) {
@@ -156,19 +185,19 @@ void ZedPilotNode::setControlMatrix(const string &matrixString)
                     case '-': value = -1; break;
                     default:
                         ROS_FATAL("Wrong control_mat: unexpected '%c'!", c);
-                        return;
+                        return false;
                 }
                 mode = OUT;
             } else {
                 ROS_FATAL("Wrong control_mat: unexpected '%c'!", c);
-                return;
+                return false;
             }
         } else if (c == '/') {
             if (mode == END)
                 mode = IN;
             else {
                 ROS_FATAL("Wrong control_mat: unexpected '%c'!", c);
-                return;
+                return false;
             }
         }
     }
@@ -176,9 +205,10 @@ void ZedPilotNode::setControlMatrix(const string &matrixString)
     ROS_INFO_STREAM("Control matrix:" << endl << cm);
     pilot.setControlMatrix(cm);
     controlEnabled = true;
+    return true;
 }
 
-void ZedPilotNode::init()
+bool ZedPilotNode::init()
 {
     // Defaults
     int
@@ -205,7 +235,7 @@ void ZedPilotNode::init()
     nhp.param<string>("camera_frame", cameraFrameId, "camera_frame");
 
     nhp.getParam("control_mat", controlMatrix);
-    setControlMatrix(controlMatrix);
+    if (!setControlMatrix(controlMatrix)) return false;
 
     nhp.getParam("video_udp_target", videoUdpTarget);
     nhp.getParam("svo_output_prefix", svoOutputPrefix);
@@ -243,9 +273,10 @@ void ZedPilotNode::init()
         open((sl::RESOLUTION)resolution, zedId);
 
     tfBuffer = make_unique<tf2_ros::Buffer>();
-    advertise();
+    if (!advertise()) return false;
     subscribe();
-    setMavFrame();
+    if (!setMavFrame()) return false;
+    return true;
 }
 
 void ZedPilotNode::spin()
@@ -317,9 +348,32 @@ void ZedPilotNode::publishVelositySP(const Vector3f &linear, const Vector3f &ang
     a.x = double(angular[0]);
     a.y = double(angular[1]);
     a.z = double(angular[2]);
-    //velocitySpPub.publish(velocitySP);
+    if (velocityStamped)
+        velocitySpPub.publish(velocitySP);
+    else
+        velocitySpUnstPub.publish(velocitySP.twist);
+}
 
-    velocitySpUnstPub.publish(velocitySP.twist);
+void ZedPilotNode::publishManualControl(const Vector3f &linear, const Vector3f &angular)
+{
+    manualControlMsg.header.stamp = ros::Time::now();
+    manualControlMsg.header.seq++;
+    manualControlMsg.buttons = 0;
+    const float maxpr = 600, maxt = 600;
+    float x = linear.x() * 5000;
+    if (x > maxpr) x = maxpr;
+    if (x < -maxpr) x = -maxpr;
+    manualControlMsg.x = x;
+    float y = linear.y() * 5000;
+    if (y > maxpr) y = maxpr;
+    if (y < -maxpr) y = -maxpr;
+    manualControlMsg.y = y;
+    float z = 1000 * linear.z();
+    if (z > maxt) z = maxt;
+    if (z < -maxt) z = -maxt;
+    manualControlMsg.z = z;
+    manualControlMsg.r = angular.z() * 20;
+    manualControlPub.publish(manualControlMsg);
 }
 
 void ZedPilotNode::publishAttitudeSP(const Quaternionf &attitude, float thrust)
@@ -404,7 +458,7 @@ void ZedPilotNode::publishState()
     statePub.publish(state);
 }
 
-void ZedPilotNode::setMavFrame()
+bool ZedPilotNode::setMavFrame()
 {
     ros::ServiceClient client = nh.serviceClient<mavros_msgs::SetMavFrame>("/mavros/setpoint_velocity/mav_frame");
     mavros_msgs::SetMavFrame setMavFrame;
@@ -413,15 +467,18 @@ void ZedPilotNode::setMavFrame()
     if (client.call(setMavFrame))
     {
         ROS_INFO("SetMavFrame returned: %d", int(setMavFrame.response.success));
-    } else
+        return true;
+    } else {
         ROS_FATAL("Unable to call service /mavros/setpoint_velocity/mav_frame");
+        return false;
+    }
 }
 
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "pilot");
     ZedPilotNode node;
-    node.init();
-    node.spin();
+    if (node.init())
+        node.spin();
     node.shutdown();
 }
