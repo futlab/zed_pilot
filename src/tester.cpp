@@ -214,7 +214,7 @@ bool TesterNode::doTest(const sl::Translation &translation, const sl::Orientatio
                 controlMsg.y = values[actionIdx];
                 break;
             case 'Z':
-                controlMsg.z = values[actionIdx];
+                controlMsg.z = throttle0 + values[actionIdx];
                 break;
             case 'R':
                 controlMsg.r = values[actionIdx];
