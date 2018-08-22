@@ -24,6 +24,13 @@ vector<Action> actions = {
     {'T', 0.1f, 0.3f, 0.1f}
 };
 
+vector<Action> actionsZ = {
+    {'Z', -300, -100, 100},
+    {'T', 0.2f, 0.4f, 0.1f},
+    {'Z', 100, 300, 100},
+    {'T', 0.2f, 0.4f, 0.1f}
+};
+
 class TesterNode
 {
 private:
@@ -168,6 +175,7 @@ bool TesterNode::startTest()
     controlMsg.z = 0;
     controlMsg.r = 0;
     z0 = nanf("");
+    camera.resetTracking(sl::Transform());
     return true;
 }
 
@@ -188,10 +196,10 @@ bool TesterNode::doTest(const sl::Translation &translation, const sl::Orientatio
         else {
             if (z0 + 0.1f < -translation.z) {
                 state = ACTION;
-                ROS_INFO("Start actions");
                 throttle0 = controlMsg.z;
+                ROS_INFO("Started actions at throttle %f", throttle0);
             } else {
-                controlMsg.z += 1.0f;
+                controlMsg.z += 0.5f;
                 if (controlMsg.z > 500.0f) {
                     ROS_FATAL("Cannot find throttle neutral level");
                     return false;
@@ -375,7 +383,7 @@ void TesterNode::writeLog(const sl::Translation &translation, const sl::Orientat
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "tester");
-    TesterNode node(actions);
+    TesterNode node(actionsZ);
     if (node.init()) {
         node.spin();
         return 0;
