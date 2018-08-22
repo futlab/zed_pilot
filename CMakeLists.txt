@@ -101,6 +101,14 @@ if (${USE_ROS})
         ${catkin_LIBRARIES}
         ${LIBRARIES}
     )
+
+    add_executable(tester
+        src/tester.cpp
+    )
+    target_link_libraries(tester
+        ${catkin_LIBRARIES}
+        ${LIBRARIES}
+    )
 else()
     add_executable(pilot
         src/main.cpp

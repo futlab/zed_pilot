@@ -478,7 +478,12 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "pilot");
     ZedPilotNode node;
-    if (node.init())
+    if (node.init()) {
         node.spin();
-    node.shutdown();
+        node.shutdown();
+        return 0;
+    } else {
+        node.shutdown();
+        return -1;
+    }
 }
