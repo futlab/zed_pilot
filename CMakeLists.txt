@@ -104,6 +104,7 @@ if (${USE_ROS})
 
     add_executable(tester
         src/tester.cpp
+        src/aruco.cpp           include/aruco.h
     )
     target_link_libraries(tester
         ${catkin_LIBRARIES}
@@ -118,6 +119,13 @@ else()
         ${LIBRARIES}
     )
 endif()
+
+add_executable(arucogen
+    src/arucogen.cpp
+)
+target_link_libraries(arucogen
+    ${OpenCV_LIBRARIES}
+)
 
 #############
 ## Testing ##

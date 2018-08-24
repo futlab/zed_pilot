@@ -9,22 +9,26 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fstream>
+#include "aruco.h"
+#ifdef SHOW_RESULT
+#include <opencv2/highgui.hpp>
+#endif
 
 using namespace std;
 
-struct Action {
+struct TestAction {
     char axis;
     float valueMin, valueMax, step;
 };
 
-vector<Action> actions = {
+vector<TestAction> actions = {
     {'X', 100, 300, 100},
     {'T', 0.1f, 0.3f, 0.1f},
     {'X', 0, 0, 0},
     {'T', 0.1f, 0.3f, 0.1f}
 };
 
-vector<Action> actionsZ = {
+vector<TestAction> actionsZ = {
     {'Z', -300, -100, 100},
     {'T', 0.2f, 0.4f, 0.1f},
     {'Z', 100, 300, 100},
@@ -40,9 +44,14 @@ private:
     ros::Publisher manualControlPub;
     ros::Subscriber mavStateSub, mavPoseSub, odomSub;
     sl::Camera camera;
-    vector<Action> actions;
+    vector<TestAction> actions;
     size_t actionIdx;
     ros::Time waitUntil;
+
+    std::unique_ptr<sl::Mat> slLeftImage, slRightImage;
+    cv::Mat leftImage, rightImage;
+    Aruco aruco;
+
     enum State {
         TAKEOFF,
         ACTION,
@@ -50,10 +59,10 @@ private:
         LANDING
     } state;
     vector<float> values;
-    void initValues(const vector<Action> &actions);
+    void initValues(const vector<TestAction> &actions);
     bool nextValues();
     string valuesToName();
-    bool armed, failed;
+    bool armed, failed, armCheck;
     fstream log;
     int logLine = 0, poseLine = 0;
     float z0, throttle0;
@@ -65,8 +74,9 @@ private:
     bool startTest();
     bool doTest(const sl::Translation &translation, const sl::Orientation &orientation);
     bool nextTest();
+    void processImage();
 public:
-    TesterNode(const vector<Action> &actions);
+    TesterNode(const vector<TestAction> &actions);
     bool init();
     void spin();
     void disarm();
@@ -75,7 +85,7 @@ public:
     ~TesterNode();
 };
 
-void TesterNode::initValues(const vector<Action> &actions)
+void TesterNode::initValues(const vector<TestAction> &actions)
 {
     this->actions = actions;
     auto l = actions.size();
@@ -119,10 +129,32 @@ void TesterNode::sendManualControl()
     manualControlPub.publish(controlMsg);
 }
 
-TesterNode::TesterNode(const vector<Action> &actions) : nhp("~"), armed(false)
+TesterNode::TesterNode(const vector<TestAction> &actions) : nhp("~"), armed(false), armCheck(true)
 {
     initValues(actions);
     controlMsg.buttons = 0;
+}
+
+cv::Mat slMat2cvMat(sl::Mat& input)
+{
+    using namespace sl;
+    // Mapping between MAT_TYPE and CV_TYPE
+    int cv_type = -1;
+    switch (input.getDataType()) {
+        case MAT_TYPE_32F_C1: cv_type = CV_32FC1; break;
+        case MAT_TYPE_32F_C2: cv_type = CV_32FC2; break;
+        case MAT_TYPE_32F_C3: cv_type = CV_32FC3; break;
+        case MAT_TYPE_32F_C4: cv_type = CV_32FC4; break;
+        case MAT_TYPE_8U_C1: cv_type = CV_8UC1; break;
+        case MAT_TYPE_8U_C2: cv_type = CV_8UC2; break;
+        case MAT_TYPE_8U_C3: cv_type = CV_8UC3; break;
+        case MAT_TYPE_8U_C4: cv_type = CV_8UC4; break;
+        default: break;
+    }
+
+    // Since cv::Mat data requires a uchar* pointer, we get the uchar1 pointer from sl::Mat (getPtr<T>())
+    // cv::Mat and sl::Mat will share a single memory structure
+    return cv::Mat(int(input.getHeight()), int(input.getWidth()), cv_type, input.getPtr<sl::uchar1>(MEM_CPU));
 }
 
 bool TesterNode::init()
@@ -131,6 +163,9 @@ bool TesterNode::init()
     {
         ROS_FATAL("Parameter log_prefix required");
         return false;
+    }
+    if (nhp.getParam("arm_check", armCheck)) {
+        armed = !armCheck;
     }
     sl::InitParameters initParams;
     initParams.camera_resolution = sl::RESOLUTION_VGA;//RESOLUTION_HD720; // Use HD720 video mode (default fps: 60)
@@ -156,7 +191,18 @@ bool TesterNode::init()
 
     advertise();
     subscribe();
-    startTest();
+
+    slLeftImage  = make_unique<sl::Mat>(camera.getResolution(), sl::MAT_TYPE_8U_C4, sl::MEM_CPU);
+    slRightImage = make_unique<sl::Mat>(camera.getResolution(), sl::MAT_TYPE_8U_C4, sl::MEM_CPU);
+    leftImage = slMat2cvMat(*slLeftImage);
+    rightImage = slMat2cvMat(*slRightImage);
+    auto ci = camera.getCameraInformation();
+    auto cam = ci.calibration_parameters.left_cam;
+    aruco.cameraMatrix.at<double>(0, 0) = cam.fx;
+    aruco.cameraMatrix.at<double>(1, 1) = cam.fy;
+    aruco.cameraMatrix.at<double>(0, 2) = cam.cx;
+    aruco.cameraMatrix.at<double>(1, 2) = cam.cy;
+    aruco.baseline = double(ci.calibration_parameters.T.x);
     return true;
 }
 
@@ -259,6 +305,16 @@ bool TesterNode::doTest(const sl::Translation &translation, const sl::Orientatio
     return true;
 }
 
+void TesterNode::processImage()
+{
+    camera.retrieveImage(*slLeftImage, sl::VIEW_LEFT, sl::MEM_CPU);
+    camera.retrieveImage(*slRightImage, sl::VIEW_RIGHT, sl::MEM_CPU);
+
+    aruco.process(leftImage, rightImage);
+#ifdef SHOW_RESULT
+#endif
+}
+
 void TesterNode::spin()
 {
     failed = false;
@@ -270,18 +326,22 @@ void TesterNode::spin()
         ros::spinOnce();
         waitRate.sleep();
     }
-    //    initTest(test);
     while(armed && ros::ok()) {
         if (!log.is_open())
             if(!startTest())
                 break;
         sl::Pose zedPose;
-        if (camera.grab() == sl::SUCCESS) {
+        auto e = camera.grab();
+        if (e == sl::SUCCESS) {
             sl::TRACKING_STATE state = camera.getPosition(zedPose, sl::REFERENCE_FRAME_WORLD);
         } else {
-            ROS_FATAL("Unable to grab");
+            if (e == sl::ERROR_CODE_NOT_A_NEW_FRAME) {
+                continue;
+            }
+            ROS_FATAL("Unable to grab: %s", sl::toString(e).c_str());
             break;
         }
+        processImage();
         auto translation = zedPose.getTranslation();
         auto orientation = zedPose.getOrientation();
 
@@ -328,7 +388,8 @@ TesterNode::~TesterNode()
 
 void TesterNode::mavStateCallback(const mavros_msgs::State::ConstPtr &state)
 {
-    armed = state->armed;
+    if (armCheck)
+        armed = state->armed;
 }
 
 void TesterNode::mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose)
