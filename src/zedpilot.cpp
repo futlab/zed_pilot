@@ -1,6 +1,6 @@
 ﻿#include <iostream>
 #include <opencv2/imgproc.hpp>
-#ifdef SHOW_RESULT
+#ifdef WITH_GUI
 #include <opencv2/highgui.hpp>
 #endif
 
@@ -219,7 +219,7 @@ void ZedPilot::processStateImage()
     cv::cvtColor(stateImage4, stateImage, cv::COLOR_RGBA2RGB);
 
     pilot.drawState(stateImage);
-#ifdef SHOW_RESULT
+#ifdef WITH_GUI
     cv::imshow("State image", stateImage);
     switch (cv::waitKey(1)) {
     case 'p': pause = !pause; break;
@@ -253,7 +253,7 @@ void ZedPilot::publishStateImage(const cv::Mat &stateImage)
 
 void ZedPilot::grab()
 {
-#ifdef SHOW_RESULT
+#ifdef WITH_GUI
     if (!pause) {
 #endif
         auto grabStatus = camera.grab(runtimeParameters);
@@ -290,7 +290,7 @@ void ZedPilot::grab()
                 }
             }
         }
-#ifdef SHOW_RESULT
+#ifdef WITH_GUI
     }
 #endif
 

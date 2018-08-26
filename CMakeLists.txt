@@ -1,16 +1,22 @@
 cmake_minimum_required(VERSION 3.1)
 project(zed_pilot)
 
-option(USE_ROS "Use ROS" ON)
-option(SHOW_RESULT "Show result" OFF)
+## Options ##
+
+option(WITH_ROS "With ROS" ON)
+option(WITH_GUI "Show result" OFF)
 option(USE_GST "Use gstreamer" ON)
 option(MSG_GEN "Generate message" OFF)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(${SHOW_RESULT})
-  add_definitions(-DSHOW_RESULT)
+if(${WITH_ROS})
+    add_definitions(-DWITH_ROS)
+endif()
+
+if(${WITH_GUI})
+    add_definitions(-DWITH_GUI)
 endif()
 
 ##############
@@ -21,11 +27,13 @@ find_package(ZED 2 REQUIRED)
 find_package(CUDA ${ZED_CUDA_VERSION} EXACT REQUIRED)
 find_package(OpenCV REQUIRED)
 
-if(NOT DEFINED ${Eigen3_INCLUDE_DIRS})
+if(NOT ${Eigen3_INCLUDE_DIRS})
     find_package(Eigen3 REQUIRED)
 endif()
 
-if (${USE_ROS})
+#if(NOT ${Sophus_INCLUDE_DIRS}) find_package(Sophus REQUIRED) endif()
+
+if (${WITH_ROS})
     if(${USE_GST})
         add_definitions(-DUSE_GST)
         find_package(PkgConfig)
@@ -73,6 +81,7 @@ include_directories(
   ${ZED_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS}
   ${Eigen3_INCLUDE_DIRS}
+  ${Sophus_INCLUDE_DIRS}
   ${GST_INCLUDE_DIRS}
   include
 )
@@ -92,7 +101,7 @@ set(LIBRARIES
     ${CUDA_CUDA_LIBRARY} ${CUDA_CUDART_LIBRARY} ${CUDA_NPP_LIBRARIES_ZED}
 )
 
-if (${USE_ROS})
+if (${WITH_ROS})
     add_executable(pilot_node
         src/node.cpp
         ${SOURCES}
@@ -102,22 +111,14 @@ if (${USE_ROS})
         ${LIBRARIES}
     )
 
-    add_executable(tester
-        src/tester.cpp
-        src/aruco.cpp           include/aruco.h
-    )
-    target_link_libraries(tester
-        ${catkin_LIBRARIES}
-        ${LIBRARIES}
-    )
 else()
-    add_executable(pilot
-        src/main.cpp
-        ${SOURCES}
-    )
-    target_link_libraries(pilot
-        ${LIBRARIES}
-    )
+    #add_executable(pilot
+    #    src/main.cpp
+    #    ${SOURCES}
+    #)
+    #target_link_libraries(pilot
+    #    ${LIBRARIES}
+    #)
 endif()
 
 add_executable(arucogen
@@ -126,6 +127,16 @@ add_executable(arucogen
 target_link_libraries(arucogen
     ${OpenCV_LIBRARIES}
 )
+
+add_executable(tester
+    src/tester.cpp
+    src/aruco.cpp           include/aruco.h
+)
+target_link_libraries(tester
+    ${catkin_LIBRARIES}
+    ${LIBRARIES}
+)
+
 
 #############
 ## Testing ##
