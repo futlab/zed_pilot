@@ -1,3 +1,4 @@
+#include <cmath>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -308,7 +309,7 @@ public:
     {
         switch (state) {
         case TAKEOFF:
-            if (isnanf(z0))
+            if (isnan(z0))
                 z0 = -translation.z;
             else {
                 if (z0 + 0.1f < -translation.z) {
