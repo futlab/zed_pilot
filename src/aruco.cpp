@@ -118,6 +118,14 @@ private:
         GaussianBlur(gray, gray, Size(7, 7), 0);
         aruco::detectMarkers(gray, dictionary, markerCorners, markerIds, parameters, rejectedCandidates);
         aruco::estimatePoseSingleMarkers(markerCorners, float(markerDefSize), parent->cameraMatrix, parent->distCoeffs, rvecs, tvecs);
+
+        /*Mat rgb;
+        cvtColor(image, rgb, COLOR_BGRA2BGR);
+        aruco::drawDetectedMarkers(rgb, markerCorners, markerIds);
+        for(size_t i=0; i < markerIds.size(); i++)
+                cv::aruco::drawAxis(rgb, parent->cameraMatrix, parent->distCoeffs, rvecs[i], tvecs[i], 0.05);
+        imshow("Markers", rgb);
+        waitKey();*/
     }
     void initializeByFrame(Frame &frame)
     {

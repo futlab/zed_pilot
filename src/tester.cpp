@@ -19,6 +19,7 @@
 #else
 #define ROS_FATAL printf
 #define ROS_INFO printf
+#define ROS_ERROR printf
 #endif
 
 #ifdef __unix__
@@ -113,10 +114,10 @@ public:
 		rightImage = slMat2cvMat(*slRightImage);
 		auto ci = getCameraInformation();
 		auto cam = ci.calibration_parameters.left_cam;
-		aruco.cameraMatrix.at<double>(0, 0) = cam.fx;
-		aruco.cameraMatrix.at<double>(1, 1) = cam.fy;
-		aruco.cameraMatrix.at<double>(0, 2) = cam.cx;
-		aruco.cameraMatrix.at<double>(1, 2) = cam.cy;
+        aruco.cameraMatrix.at<float>(0, 0) = cam.fx;
+        aruco.cameraMatrix.at<float>(1, 1) = cam.fy;
+        aruco.cameraMatrix.at<float>(0, 2) = cam.cx;
+        aruco.cameraMatrix.at<float>(1, 2) = cam.cy;
 		aruco.baseline = double(ci.calibration_parameters.T.x);
 		return true;
 	}
@@ -125,8 +126,7 @@ public:
 		auto e = grab();
 		if (e == sl::SUCCESS) {
 			sl::TRACKING_STATE state = getPosition(zedPose, sl::REFERENCE_FRAME_WORLD);
-		}
-		else {
+        } else {
 			if (e == sl::ERROR_CODE_NOT_A_NEW_FRAME) {
 				return true;
 			}
@@ -144,6 +144,54 @@ public:
 
 };
 
+class Tester;
+
+class LogWriter
+{
+private:
+    int line, valCount;
+    const int fieldCount;
+    fstream *log;
+    friend class Tester;
+    string name, header;
+
+    void init(fstream *log)
+    {
+        this->log = log;
+        line = 1;
+        valCount = 0;
+        *log << header;
+    }
+public:
+    LogWriter(const string &name, const vector<string> &fields) : line(1), fieldCount(int(fields.size())), name(name)
+    {
+        header = name + ".columns = {";
+        for (auto &f : fields)
+            header += "'" + f + "', ";
+        header.resize(header.size() - 2);
+        header += "};\n";
+    }
+    template<typename T>
+    LogWriter& operator<<(const T& value)
+    {
+        if (value == endl) {
+            assert(fieldCount == valCount);
+            valCount = 0;
+            line++;
+            *log << "];" << endl;
+        } else {
+            if (!valCount)
+                *log << name << ".data(" << line << ",:) = [";
+            else
+                *log << ",";
+            valCount++;
+            assert(valCount <= fieldCount);
+            *log << value;
+        }
+        return *this;
+    }
+};
+
 class Tester
 {
 private:
@@ -156,19 +204,36 @@ private:
 		LANDING
 	} state;
 	vector<float> values;
+    struct Control { float x, y, z, r; } control;
 	fstream log;
+    chrono::time_point<chrono::high_resolution_clock> waitUntil;
 	int logLine = 0, poseLine = 0;
-	std::string logPrefix;
 public:
-	bool openLog(const string &fn)
+    bool armed, failed, armCheck;
+    float z0, throttle0;
+    vector<LogWriter *> writers;
+    LogWriter controlWriter, zedWriter;
+    inline bool isOpen() const { return log.is_open(); }
+    std::string logPrefix;
+    Tester() :
+        control{},
+        armed(false), armCheck(true),
+        controlWriter("ctl", {"x", "y", "z", "r"}),
+        zedWriter("zed", {"timestamp", "x", "y", "z", "roll", "pitch", "yaw"})
+    {
+    }
+    bool openLog(const string &fn)
 	{
 		if (log.is_open()) log.close();
 		if (fileExists(fn))
 			return false;
 		log.open(fn, ios::out);
-		log << "zed.columns = {'timestamp','x','y','z','roll','pitch','yaw'};" << endl;
+        for (auto &w : writers)
+            w->init(&log);
+
+        /*log << "zed.columns = {'timestamp','x','y','z','roll','pitch','yaw'};" << endl;
 		log << "ctl.columns = {'x','y','z','r'};" << endl;
-		log << "pose.column = {'x','y','z','w','pitch','roll','yaw'};" << endl;
+        log << "pose.column = {'x','y','z','w','pitch','roll','yaw'};" << endl;*/
 		return true;
 	}
 	void initValues(const vector<TestAction> &actions)
@@ -191,7 +256,7 @@ public:
 		}
 		return false;
 	}
-	string valuesToName()
+    string valuesToName() const
 	{
 		auto l = actions.size();
 		stringstream stream;
@@ -229,6 +294,7 @@ public:
 		ROS_INFO("Started log '%s'", logName.c_str());
 		state = TAKEOFF;
 		actionIdx = 0;
+        z0 = nanf("");
 		return true;
 	}
 	bool nextTest()
@@ -238,6 +304,78 @@ public:
 		if (!nextValues()) return false;
 		return startTest();
 	}
+    bool doTest(const sl::Translation &translation, const sl::Orientation &orientation)
+    {
+        switch (state) {
+        case TAKEOFF:
+            if (isnanf(z0))
+                z0 = -translation.z;
+            else {
+                if (z0 + 0.1f < -translation.z) {
+                    state = ACTION;
+                    throttle0 = control.z;
+                    ROS_INFO("Started actions at throttle %f", throttle0);
+                } else {
+                    control.z += 0.5f;
+                    if (control.z > 500.0f) {
+                        ROS_FATAL("Cannot find throttle neutral level");
+                        return false;
+                    }
+                }
+            }
+            break;
+        case ACTION:
+            if (actionIdx >= actions.size()) {
+                ROS_INFO("Actions completed");
+                waitUntil = chrono::high_resolution_clock::now() + chrono::seconds(3);
+                state = LANDING;
+            } else {
+                char axis = actions[actionIdx].axis;
+                switch(axis) {
+                case 'X':
+                    control.x = values[actionIdx];
+                    break;
+                case 'Y':
+                    control.y = values[actionIdx];
+                    break;
+                case 'Z':
+                    control.z = throttle0 + values[actionIdx];
+                    break;
+                case 'R':
+                    control.r = values[actionIdx];
+                    break;
+                case 'T':
+                    waitUntil = chrono::high_resolution_clock::now() + chrono::milliseconds(int(1000 * values[actionIdx]));
+                    state = WAIT;
+                    break;
+                default:
+                    ROS_ERROR("Unknown axis '%c'", axis);
+                }
+                actionIdx++;
+            }
+            break;
+        case WAIT:
+            if (chrono::high_resolution_clock::now() < waitUntil)
+                break;
+            state = ACTION;
+            break;
+        case LANDING:
+            control.x = 0;
+            control.y = 0;
+            control.z = 50;
+            control.r = 0;
+            if (chrono::high_resolution_clock::now() < waitUntil)
+                break;
+            ROS_INFO("Test completed");
+            return nextTest();
+        /*default:
+            ROS_ERROR("Unknown state %d", int(state));
+            state = LANDING;
+            break;*/
+        }
+        return true;
+    }
+    ~Tester() { if (log.is_open()) log.close(); }
 };
 
 #ifdef WITH_ROS
@@ -245,6 +383,8 @@ class TesterNode
 {
 private:
 	Tester tester;
+    Camera camera;
+    LogWriter poseWriter;
     ros::NodeHandle nh, nhp;
     mavros_msgs::ManualControl controlMsg;
     ros::Publisher manualControlPub;
@@ -253,8 +393,6 @@ private:
 	void mavStateCallback(const mavros_msgs::State::ConstPtr &state);
 	void mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose);
 
-    bool armed, failed, armCheck;
-    float z0, throttle0;
 	void sendManualControl()
 	{
 		controlMsg.header.stamp = ros::Time::now();
@@ -266,20 +404,22 @@ private:
     bool nextTest();
     void processImage();
 public:
-	TesterNode(const vector<TestAction> &actions) : nhp("~"), armed(false), armCheck(true)
+    TesterNode(const vector<TestAction> &actions) : nhp("~"),
+        poseWriter("pose", {"x", "y", "z", "w", "pitch", "roll", "yaw"})
 	{
 		tester.initValues(actions);
+        tester.writers.push_back(&poseWriter);
 		controlMsg.buttons = 0;
 	}
 	bool init()
 	{
-		if (!nhp.getParam("log_prefix", logPrefix))
+        if (!nhp.getParam("log_prefix", tester.logPrefix))
 		{
 			ROS_FATAL("Parameter log_prefix required");
 			return false;
 		}
-		if (nhp.getParam("arm_check", armCheck)) {
-			armed = !armCheck;
+        if (nhp.getParam("arm_check", tester.armCheck)) {
+            tester.armed = !tester.armCheck;
 	}
 
 		string svoInput;
@@ -306,108 +446,37 @@ bool TesterNode::startTest()
     controlMsg.y = 0;
     controlMsg.z = 0;
     controlMsg.r = 0;
-    z0 = nanf("");
     camera.resetTracking(sl::Transform());
-    return true;
-}
-
-bool TesterNode::doTest(const sl::Translation &translation, const sl::Orientation &orientation)
-{
-    switch (state) {
-    case TAKEOFF:
-        if (isnanf(z0))
-            z0 = -translation.z;
-        else {
-            if (z0 + 0.1f < -translation.z) {
-                state = ACTION;
-                throttle0 = controlMsg.z;
-                ROS_INFO("Started actions at throttle %f", throttle0);
-            } else {
-                controlMsg.z += 0.5f;
-                if (controlMsg.z > 500.0f) {
-                    ROS_FATAL("Cannot find throttle neutral level");
-                    return false;
-                }
-            }
-        }
-        break;
-    case ACTION:
-        if (actionIdx >= actions.size()) {
-            ROS_INFO("Actions completed");
-            waitUntil = ros::Time::now() + ros::Duration(3.0);
-            state = LANDING;
-        } else {
-            char axis = actions[actionIdx].axis;
-            switch(axis) {
-            case 'X':
-                controlMsg.x = values[actionIdx];
-                break;
-            case 'Y':
-                controlMsg.y = values[actionIdx];
-                break;
-            case 'Z':
-                controlMsg.z = throttle0 + values[actionIdx];
-                break;
-            case 'R':
-                controlMsg.r = values[actionIdx];
-                break;
-            case 'T':
-                waitUntil = ros::Time::now() + ros::Duration(double(values[actionIdx]));
-                state = WAIT;
-                break;
-            default:
-                ROS_ERROR("Unknown axis '%c'", axis);
-            }
-            actionIdx++;
-        }
-        break;
-    case WAIT:
-        if (ros::Time::now() < waitUntil)
-            break;
-        state = ACTION;
-        break;
-    case LANDING:
-        controlMsg.x = 0;
-        controlMsg.y = 0;
-        controlMsg.z = 50;
-        controlMsg.r = 0;
-        if (ros::Time::now() < waitUntil)
-            break;
-        ROS_INFO("Test completed");
-        return nextTest();
-    /*default:
-        ROS_ERROR("Unknown state %d", int(state));
-        state = LANDING;
-        break;*/
-    }
     return true;
 }
 
 void TesterNode::spin()
 {
-	failed = false;
+    tester.failed = false;
 	ros::Rate waitRate(1), execRate(100);
-	while (!armed) {
+    while (!tester.armed) {
 		if (!ros::ok())
 			return;
 		ROS_INFO("Wait for arming...");
 		ros::spinOnce();
 		waitRate.sleep();
 	}
-	while (armed && ros::ok()) {
-		if (!log.is_open())
+    while (tester.armed && ros::ok()) {
+        if (!tester.isOpen())
 			if (!startTest())
 				break;
-		auto translation = zedPose.getTranslation();
-		auto orientation = zedPose.getOrientation();
+        if (!camera.processImage())
+            break;
+        auto translation = camera.zedPose.getTranslation();
+        auto orientation = camera.zedPose.getOrientation();
 
 		if (!doTest(translation, orientation)) break;
 		sendManualControl();
-		writeLog(translation, orientation, zedPose.timestamp);
+        writeLog(translation, orientation, camera.zedPose.timestamp);
 		ros::spinOnce();
 		execRate.sleep();
 	}
-	if (armed)
+    if (tester.armed)
 		disarm();
 	else
 		ROS_WARN("Disarmed, terminating ...");
@@ -437,21 +506,15 @@ void TesterNode::subscribe()
 	mavPoseSub = nh.subscribe<geometry_msgs::PoseStamped>("mavros/local_position/pose", 1, &TesterNode::mavPoseCallback, this);
 }
 
-TesterNode::~TesterNode()
-{
-	if (log.is_open()) log.close();
-}
-
 void TesterNode::mavStateCallback(const mavros_msgs::State::ConstPtr &state)
 {
-	if (armCheck)
-		armed = state->armed;
+    if (tester.armCheck)
+        tester.armed = state->armed;
 }
 
 void TesterNode::mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pose)
 {
-	if (!log.is_open()) return;
-	poseLine++;
+    if (!tester.isOpen()) return;
 	auto &o = pose->pose.orientation;
 	sl::Orientation so;
 	so.x = float(o.x);
@@ -459,10 +522,11 @@ void TesterNode::mavPoseCallback(const geometry_msgs::PoseStamped::ConstPtr &pos
 	so.z = float(o.z);
 	so.w = float(o.w);
 	auto e = so.getRotation().getEulerAngles();
-	log << "pose.data(" << poseLine << ",:) = ["
+    /*log << "pose.data(" << poseLine << ",:) = ["
 		<< o.x << "," << o.y << "," << o.z << "," << o.w << ","
 		<< e.x << "," << e.y << "," << e.z
-		<< "];" << endl;
+        << "];" << endl;*/
+    poseWriter << o.x << o.y << o.z << o.w << e.x << e.y << e.z << endl;
 }
 
 int main(int argc, char **argv)
