@@ -115,10 +115,10 @@ public:
 		rightImage = slMat2cvMat(*slRightImage);
 		auto ci = getCameraInformation();
 		auto cam = ci.calibration_parameters.left_cam;
-        aruco.cameraMatrix.at<float>(0, 0) = cam.fx;
-        aruco.cameraMatrix.at<float>(1, 1) = cam.fy;
-        aruco.cameraMatrix.at<float>(0, 2) = cam.cx;
-        aruco.cameraMatrix.at<float>(1, 2) = cam.cy;
+        aruco.cameraMatrix.at<double>(0, 0) = double(cam.fx);
+        aruco.cameraMatrix.at<double>(1, 1) = double(cam.fy);
+        aruco.cameraMatrix.at<double>(0, 2) = double(cam.cx);
+        aruco.cameraMatrix.at<double>(1, 2) = double(cam.cy);
 		aruco.baseline = double(ci.calibration_parameters.T.x);
 		return true;
 	}
