@@ -3,10 +3,12 @@
 #include <map>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <unsupported/Eigen/AutoDiff>
 #include <sophus/se3.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/viz.hpp>
 #include "../include/aruco.h"
 #include <iostream>
 
@@ -57,11 +59,11 @@ struct Marker
 			points[i] << x, y, z;
 		}
 	}
-	Marker(const FrameMarker &fm, const Matrix3d &rotation, const Vector3d &translation, double baseline)
+    Marker(const FrameMarker &fm, const SE3d &pose, double baseline)
 	{
 		convertPoints(fm.leftPoints, fm.rightPoints, points, baseline);
 		for (size_t i = 0; i < 4; ++i)
-			points[i] = rotation * points[i] + translation;
+            points[i] = pose * points[i];
 	}
 	Marker() {}
 };
@@ -78,6 +80,10 @@ private:
     cv::Mat gray;
     const Aruco *const parent;
     SE3d cameraPose;
+#ifdef WITH_GUI
+    cv::viz::Viz3d viz;
+    vector<Vector3d> dumpPoints;
+#endif
 public:
     Aruco_(const Aruco *parent) :
         dictionary(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_250)),
@@ -107,6 +113,8 @@ public:
             frame->pose = cameraPose;
             //optimize<true, false>();
             optimizeFrameTranslation(*frame);
+            dumpPoints.push_back(frame->pose.translation());
+            visualize();
             optimizeFramePose(*frame);
         }
         cameraPose = frame->pose;
@@ -193,17 +201,16 @@ private:
 		Vector3d points[4];
 		Marker::convertPoints(marker.leftPoints, marker.rightPoints, points, parent->baseline);
 		Vector3d
-			x = points[1] - points[0] + points[3] - points[2],
-			y = points[2] - points[0] + points[3] - points[1],
+            x = (points[1] - points[0] + points[2] - points[3]).normalized(),
+            y = (points[3] - points[0] + points[2] - points[1]).normalized(),
 			z = x.cross(y);
 		Matrix3d rm; rm << x, y, z;
-		Quaterniond q(rm);
-		SE3d pose(q, (points[0] + points[1] + points[2] + points[3]) * 0.25);
-		frame.pose = pose.inverse();
-		rm = frame.pose.rotationMatrix();
-		Vector3d translation = frame.pose.translation();
+        Quaterniond q(rm);
+        q.normalize();
+        SE3d pose(q, (points[0] + points[1] + points[2] + points[3]) * 0.25);
+        frame.pose = pose.inverse();
         for (auto p : frame.markers) {
-            /*auto ir = */markers.insert(make_pair(p.first, Marker(p.second, rm, translation, parent->baseline)));
+            /*auto ir = */markers.insert(make_pair(p.first, Marker(p.second, frame.pose, parent->baseline)));
 			//if (!ir.second)
 			//	ir.first->second = p.second;
         }
@@ -506,9 +513,8 @@ private:
                 lens2.push_back(fp[i].squaredNorm());
             }
         }
-
         double eBest = -1;
-        for (int it = 1; it < 10; ++it) {
+        for (int it = 1; it < 25; ++it) {
             Vector3d b;
             Matrix3d a;
             a.setZero();
@@ -524,18 +530,62 @@ private:
             }
             eSum = sqrt(eSum / points.size());
             cout << "Pos iteration " << it << " error " << eSum << endl;
-            if (eBest >= 0 && eBest <= eSum) {
+            /*if (eBest >= 0 && eBest <= eSum) {
                 pos = bestPos;
                 break;
-            } else eBest = eSum;
-
-
+            } else*/ eBest = eSum;
             Vector3d dT(a.ldlt().solve(b));
             bestPos = pos;
             pos -= dT;
         }
         f.pose.translation() = pos;
         return;
+    }
+    void optimizeFrameTranslationTest(Frame &f)
+    {
+        vector<cv::viz::Widget> ws;
+        for (int x = 0; x < 10; x++) {
+            f.pose.translation()[0] += static_cast <double> (rand()) / static_cast <double> (RAND_MAX) * 2.0 - 1.0;
+            f.pose.translation()[1] += static_cast <double> (rand()) / static_cast <double> (RAND_MAX) * 3.0 - 1.5;
+            f.pose.translation()[2] += static_cast <double> (rand()) / static_cast <double> (RAND_MAX) * 2.0 - 1.0;
+            optimizeFrameTranslation(f);
+            vector<cv::Point3d> points;
+            for (const auto &dp : dumpPoints) {
+                points.push_back(cv::Point3d(dp.x(), dp.y(), dp.z()));
+            }
+            dumpPoints.clear();
+            ws.push_back(cv::viz::WPolyLine(points));
+        }
+        //visualize(ws);
+    }
+    void visualize()
+    {
+        cv::viz::WGrid grid;
+        viz.showWidget("grid", grid);
+        //cv::viz::WCameraPosition cp()
+        for (auto &m : markers) {
+            const auto *pts = m.second.points;
+            const auto  id = to_string(m.first);
+            cv::viz::WText3D text(id, cv::Point3d(pts[0].x(), pts[0].y(), pts[0].z()), 0.05, true, cv::viz::Color::azure());
+            viz.showWidget(id, text);
+            for (size_t i = 0; i < 4; ++i) {
+                size_t i1 = (i + 1) & 3;
+                cv::Point3d p1(pts[i].x(), pts[i].y(), pts[i].z()), p2(pts[i1].x(), pts[i1].y(), pts[i1].z());
+                cv::viz::WLine line(p1, p2);
+                viz.showWidget(id + "-" + to_string(i), line);
+            }
+        }
+        vector<cv::Point3d> points;
+        for (const auto &dp : dumpPoints) {
+            points.push_back(cv::Point3d(dp.x(), dp.y(), dp.z()));
+        }
+        //dumpPoints.clear();
+        cv::viz::WPolyLine pl(points);
+
+        viz.showWidget("pl", pl);
+        //cv::viz::WPolyLine pl(points);
+
+        viz.spinOnce();
     }
 };
 
